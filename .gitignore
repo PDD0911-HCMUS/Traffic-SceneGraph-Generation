@@ -1,0 +1,10 @@
+.venv/*
+Datasets/BDD/*
+Datasets/Incidents/*
+Datasets/RS10K/*
+__pycache__
+*.rar
+*.zip
+KerasBaseLine/SaveModel3/*
+KerasBaseLine/SaveModel4/*
+References/visualgenome.pdf
