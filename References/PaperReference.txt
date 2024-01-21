@@ -1,0 +1,11 @@
+https://arxiv.org/abs/2201.11460
+RelTR: Relation Transformer for Scene Graph Generation - IEEE Transactions on Pattern Analysis and Machine Intelligence
+
+https://arxiv.org/abs/2002.11949
+Unbiased Scene Graph Generation from Biased Training - CVPR 2020
+
+https://arxiv.org/abs/2203.11654
+Fine-Grained Scene Graph Generation with Data Transfer - ECCV 2022
+
+https://arxiv.org/abs/2310.03744
+Improved Baselines with Visual Instruction Tuning
