@@ -2,6 +2,7 @@
 Datasets/BDD/*
 Datasets/Incidents/*
 Datasets/RS10K/*
+Datasets/VisualGenome/*
 __pycache__
 *.rar
 *.zip
