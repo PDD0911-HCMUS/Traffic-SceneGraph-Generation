@@ -1,52 +1,35 @@
 import torch
-from torch import nn
-from torchvision.models import resnet50
+import torch.nn as nn
+import torch.nn.functional as F
 
-class SceneGraphModelWithAttention(nn.Module):
-    def __init__(self, num_attributes, num_relations):
-        super().__init__()
-        self.backbone = resnet50(pretrained=True)
-        self.backbone.fc = nn.Identity()  # Remove the last classification layer
-        
-        # Attention layers
-        self.attribute_attention = nn.MultiheadAttention(embed_dim=..., num_heads=...)
-        self.relation_attention = nn.MultiheadAttention(embed_dim=..., num_heads=...)
-        self.final_attention = nn.MultiheadAttention(embed_dim=..., num_heads=...)
-        
-        # Additional layers for processing
-        self.attribute_fc = nn.Linear(..., num_attributes)
-        self.relation_fc = nn.Linear(..., num_relations)
-        self.final_fc = nn.Linear(..., output_size)  # Adjust output_size based on your scene graph representation
-        
+class AttentionModule(nn.Module):
+    def __init__(self, embedding_size, support_vector_size, output_size):
+        super(AttentionModule, self).__init__()
+        self.support_vector = nn.Parameter(torch.randn(support_vector_size), requires_grad=True)
+        self.attention_layer = nn.Linear(embedding_size + support_vector_size, output_size)
+        self.softmax = nn.Softmax(dim=1)
+
     def forward(self, x):
-        embeddings = self.backbone(x)
-        
-        # Process embeddings through attention layers
-        # Note: You might need to adjust the shape of embeddings to fit the attention layers
-        attribute_attention_output, _ = self.attribute_attention(embeddings, embeddings, embeddings)
-        relation_attention_output, _ = self.relation_attention(embeddings, embeddings, embeddings)
-        
-        # Process through final attention mechanism
-        combined_attention = torch.cat((attribute_attention_output, relation_attention_output), dim=1)
-        scene_graph_output, _ = self.final_attention(combined_attention, combined_attention, combined_attention)
-        
-        # Pass through final fully connected layers
-        attributes = self.attribute_fc(attribute_attention_output)
-        relations = self.relation_fc(relation_attention_output)
-        scene_graph = self.final_fc(scene_graph_output)
-        
-        return attributes, relations, scene_graph
+        # Giả sử x là vector embedding từ CNN backbone
+        # Mở rộng support_vector để phù hợp với batch_size của x
+        support_vector_batch = self.support_vector.expand(x.size(0), -1)
+        # Kết hợp vector embedding và support vector
+        combined_input = torch.cat((x, support_vector_batch), 1)
+        attention_scores = self.attention_layer(combined_input)
+        attention_weights = self.softmax(attention_scores)
+        return attention_weights
 
-# Define loss functions
-attribute_loss_fn = nn.CrossEntropyLoss()
-relation_loss_fn = nn.CrossEntropyLoss()
-scene_graph_loss_fn = nn.CrossEntropyLoss()  # Or another appropriate loss function
+# Giả sử kích thước
+embedding_size = 256  # Kích thước vector embedding từ CNN backbone
+support_vector_size = 10  # Kích thước của vector hỗ trợ
+output_size = 1  # Đối với ví dụ này, giả sử output là một điểm số attention
 
-# Example of calculating loss
-# Note: You'll need to provide target labels for attributes, relations, and the scene graph structure
-# attributes_targets, relations_targets, scene_graph_targets = ...
-# attributes_output, relations_output, scene_graph_output = model(input_images)
-# attribute_loss = attribute_loss_fn(attributes_output, attributes_targets)
-# relation_loss = relation_loss_fn(relations_output, relations_targets)
-# scene_graph_loss = scene_graph_loss_fn(scene_graph_output, scene_graph_targets)
-# total_loss = attribute_loss + relation_loss + scene_graph_loss
+# Tạo mô hình
+attention_module = AttentionModule(embedding_size, support_vector_size, output_size)
+
+# Tạo dữ liệu giả để kiểm tra
+x = torch.randn(3, embedding_size)  # Giả sử batch_size là 3
+
+# Forward pass qua module attention
+attention_weights = attention_module(x)
+print(attention_weights)
