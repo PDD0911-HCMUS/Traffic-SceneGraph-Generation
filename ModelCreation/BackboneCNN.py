@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from efficientnet_pytorch import EfficientNet
+from torch.utils.tensorboard import SummaryWriter
 
 class CNNBackbone(nn.Module):
     def __init__(self):
@@ -71,8 +72,15 @@ class MyCompleteModel(nn.Module):
 
 # Initialize the complete model
 model = MyCompleteModel()
+writer = SummaryWriter()
 
+# Tạo dummy input phù hợp với input layer của mô hình
+dummy_input = torch.randn(1, 3, 600, 600)
+
+# Thêm mô hình vào TensorBoard
+writer.add_graph(model, dummy_input)
+writer.close()
 # Example forward pass with random data
-x = torch.randn(1, 3, 600, 600)  # Example image tensor (batch size, channels, height, width)
-relation_attention_scores = model(x)
-print(relation_attention_scores)
+# x = torch.randn(1, 3, 600, 600)  # Example image tensor (batch size, channels, height, width)
+# relation_attention_scores = model(x)
+# print(relation_attention_scores)

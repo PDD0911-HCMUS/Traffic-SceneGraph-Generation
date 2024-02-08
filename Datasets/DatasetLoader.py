@@ -20,6 +20,7 @@ vgGT = 'ExtractGT'
 resize = (224,224)
 mean = (0.485, 0.456, 0.406)
 std = (0.229, 0.224, 0.225)
+batch = 4
 
 class MyTransform():
     def __init__(self, resize, mean, std):
@@ -62,7 +63,9 @@ class DatasetLoader(Dataset):
         annotation = os.path.join(imagePath.replace(vgImg, vgGT).replace('.jpg', '.json'))
         annotation = open(annotation)
         annotation = json.load(annotation)
+        
         sub,subBbox,attributeSub, obj,objBbox,attributeObj, rel = [],[],[], [],[],[], [] 
+        label = []
 
         for item in annotation:
             sub.append(item['id_sub'])
@@ -75,10 +78,13 @@ class DatasetLoader(Dataset):
 
             rel.append(item['rel'])
 
-        return imageTransform, sub,subBbox,attributeSub, obj,objBbox,attributeObj, rel
+            label += [[item['id_sub']]+item['sub_bbox']+item['att_sub'] + [item['id_obj']]+item['obj_bbox']+item['att_obj'] + [item['rel']]]
+
+        return imageTransform, sub,subBbox,attributeSub, obj,objBbox,attributeObj, rel, label
 
 def imshow(img):
     img = img.numpy().transpose((1, 2, 0))  # chuyển từ tensor sang numpy
+    img = np.clip(img, 0,1)
     plt.imshow(img)
     plt.axis('off')  # không hiển thị trục
 
@@ -92,15 +98,27 @@ def GetAllImage(imageDir):
 trainList = GetAllImage(vgRoot+vgImg)
 
 trainDataset = DatasetLoader(trainList, transform=MyTransform(resize, mean, std), mode='train')
+trainDataLoader = DataLoader(trainDataset, batch_size=batch, shuffle=True)
+
+dataloaderDict = {
+    "train": trainDataLoader,
+    "val": None
+}
+
+# batchIter = iter(dataloaderDict['train'])
+# inputs, annotation = next(batch)
+
 
 print(trainDataset.__len__())
-index = 0
-imageTransform, sub,subBbox,attributeSub, obj,objBbox,attributeObj, rel = trainDataset.__getitem__(index)
+index = 100
+imageTransform, sub,subBbox,attributeSub, obj,objBbox,attributeObj, rel, label = trainDataset.__getitem__(index)
 print(imageTransform.shape)
-print('ID Subjects: ', sub)
-print('BBox Subjects: ', subBbox)
-print('Attribute Subjects: ', attributeSub)
-print('Relation: ', rel)
+# print('ID Subjects: ', sub)
+# print('BBox Subjects: ', subBbox)
+# print('Attribute Subjects: ', attributeSub)
+# print('Relation: ', rel)
+print(len(label))
+print("Label: ", label)
 
 imshow(imageTransform)
 
