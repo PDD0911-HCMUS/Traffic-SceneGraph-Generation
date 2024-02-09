@@ -56,8 +56,9 @@ class DatasetLoader(Dataset):
     
     def __getitem__(self, index):
         imagePath = self.imageList[index]
-        print(imagePath)
+        # print(imagePath)
         image = Image.open(imagePath)
+        originalSize = image.size
         imageTransform = self.transform(image, self.mode)
 
         annotation = os.path.join(imagePath.replace(vgImg, vgGT).replace('.jpg', '.json'))
@@ -65,28 +66,76 @@ class DatasetLoader(Dataset):
         annotation = json.load(annotation)
         
         sub,subBbox,attributeSub, obj,objBbox,attributeObj, rel = [],[],[], [],[],[], [] 
-        label = []
+        objetcContext, attrContext, label = [],[],[]
 
         for item in annotation:
+            newSubBbox = ResizeBbox(item['sub_bbox'],originalSize, resize)
+            newObjBbox = ResizeBbox(item['obj_bbox'],originalSize, resize)
+
+            newSubAttr = ResizeAttributeAnno(item['att_sub'])
+            newObjAttr = ResizeAttributeAnno(item['att_obj'])
+
             sub.append(item['id_sub'])
-            subBbox.append(item['sub_bbox'])
+            subBbox.append(newSubBbox)
             attributeSub.append(item['att_sub'])
 
             obj.append(item['id_obj'])
-            objBbox.append(item['obj_bbox'])
+            objBbox.append(newObjBbox)
             attributeObj.append(item['att_obj'])
 
             rel.append(item['rel'])
 
-            label += [[item['id_sub']]+item['sub_bbox']+item['att_sub'] + [item['id_obj']]+item['obj_bbox']+item['att_obj'] + [item['rel']]]
+            objetcContext += [[item['id_sub']] + newSubBbox+[item['id_obj']]+newObjBbox]
+            attrContext += [newSubBbox+newSubAttr + newObjBbox+newObjAttr]
+            label += [[item['id_sub']]+newSubBbox+newSubAttr + [item['id_obj']]+newObjBbox+newObjAttr + [item['rel']]]
 
-        return imageTransform, sub,subBbox,attributeSub, obj,objBbox,attributeObj, rel, label
+        return imageTransform, objetcContext, attrContext, label
+        #return imageTransform, sub,subBbox,attributeSub, obj,objBbox,attributeObj, rel, label
 
 def imshow(img):
     img = img.numpy().transpose((1, 2, 0))  # chuyển từ tensor sang numpy
     img = np.clip(img, 0,1)
     plt.imshow(img)
     plt.axis('off')  # không hiển thị trục
+
+def ResizeBbox(bbox, inSize, outSize):
+    """
+    Thay đổi kích thước của bounding box dựa trên tỷ lệ thay đổi kích thước của hình ảnh.
+
+    Args:
+    - bbox (list): Bounding box gốc với định dạng [xmin, ymin, width, height].
+    - in_size (tuple): Kích thước gốc của hình ảnh (width, height).
+    - out_size (tuple): Kích thước mới của hình ảnh sau khi resize (width, height).
+
+    Returns:
+    - list: Bounding box mới đã được thay đổi kích thước.
+    """
+    xmin, ymin, width, height = bbox
+    x_scale = outSize[0] / inSize[0]
+    y_scale = outSize[1] / inSize[1]
+
+    new_xmin = xmin * x_scale
+    new_ymin = ymin * y_scale
+    new_width = width * x_scale
+    new_height = height * y_scale
+
+    return [new_xmin, new_ymin, new_width, new_height]
+
+def ResizeAttributeAnno(attr: list):
+    """
+    Giá trị mặc định của None là 50852
+    """
+    if(len(attr) < 5):
+        attr.append(50852)
+        ResizeAttributeAnno(attr)
+        return attr
+    else:
+        return attr[:5]
+
+def CheckLenghtLabel(label):
+    for item in label:
+        # print(len(item))
+        print(item)
 
 def GetAllImage(imageDir):
     imageList = []
@@ -105,21 +154,30 @@ dataloaderDict = {
     "val": None
 }
 
-# batchIter = iter(dataloaderDict['train'])
-# inputs, annotation = next(batch)
-
-
-print(trainDataset.__len__())
-index = 100
-imageTransform, sub,subBbox,attributeSub, obj,objBbox,attributeObj, rel, label = trainDataset.__getitem__(index)
-print(imageTransform.shape)
-# print('ID Subjects: ', sub)
-# print('BBox Subjects: ', subBbox)
-# print('Attribute Subjects: ', attributeSub)
-# print('Relation: ', rel)
+batchIter = iter(dataloaderDict['train'])
+inputs, objetcContext, attrContext, label = next(batchIter)
+print(len(objetcContext))
+print(len(attrContext))
 print(len(label))
-print("Label: ", label)
 
-imshow(imageTransform)
 
-plt.show()
+# print(trainDataset.__len__())
+# index = 100
+# # imageTransform, sub,subBbox,attributeSub, obj,objBbox,attributeObj, rel, label = trainDataset.__getitem__(index)
+# imageTransform, objetcContext, attrContext, label = trainDataset.__getitem__(index)
+# print(imageTransform.shape)
+# # print('ID Subjects: ', sub[:2])
+# # print('BBox Subjects: ', subBbox[:2])
+# # print('Attribute Subjects: ', attributeSub[:2])
+# # print('Relation: ', rel[:2])
+# print(len(objetcContext))
+# print(len(attrContext))
+# print(len(label))
+
+# print("Label: ", label[0])
+# print("ObjectContext: ", objetcContext[0])
+# print("AttrContext: ", attrContext[0])
+
+# imshow(imageTransform)
+
+# plt.show()
