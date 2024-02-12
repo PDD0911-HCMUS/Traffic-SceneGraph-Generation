@@ -144,21 +144,21 @@ def GetAllImage(imageDir):
         imageList.append(vgRoot + vgImg + '/' + item)
     return imageList[:]
 
-trainList = GetAllImage(vgRoot+vgImg)
+# trainList = GetAllImage(vgRoot+vgImg)
 
-trainDataset = DatasetLoader(trainList, transform=MyTransform(resize, mean, std), mode='train')
-trainDataLoader = DataLoader(trainDataset, batch_size=batch, shuffle=True)
+# trainDataset = DatasetLoader(trainList, transform=MyTransform(resize, mean, std), mode='train')
+# trainDataLoader = DataLoader(trainDataset, batch_size=batch, shuffle=True)
 
-dataloaderDict = {
-    "train": trainDataLoader,
-    "val": None
-}
+# dataloaderDict = {
+#     "train": trainDataLoader,
+#     "val": None
+# }
 
-batchIter = iter(dataloaderDict['train'])
-inputs, objetcContext, attrContext, label = next(batchIter)
-print(len(objetcContext))
-print(len(attrContext))
-print(len(label))
+# batchIter = iter(dataloaderDict['train'])
+# inputs, objetcContext, attrContext, label = next(batchIter)
+# print(len(objetcContext))
+# print(len(attrContext))
+# print(len(label))
 
 
 # print(trainDataset.__len__())
