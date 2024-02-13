@@ -72,6 +72,41 @@ class OutputCNN(nn.Module):
         # Đưa qua lớp Fully Connected để nhận vector output 18 chiều
         x = self.fc(x)
         return x
+    
+class SequenceModel(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim, num_layers, dropout_rate):
+        """
+        :param input_dim: Kích thước của mỗi phần tử trong chuỗi (ở đây là 128)
+        :param hidden_dim: Kích thước của hidden state trong LSTM/GRU
+        :param output_dim: Kích thước của output vector (ở đây là 21 * 18 = 378)
+        :param num_layers: Số lượng layers LSTM/GRU
+        :param dropout_rate: Tỷ lệ dropout để ngăn overfitting
+        """
+        super(SequenceModel, self).__init__()
+        
+        # Định nghĩa LSTM layer
+        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True, dropout=dropout_rate)
+        
+        # Định nghĩa lớp Fully Connected
+        self.fc = nn.Linear(hidden_dim, output_dim)  # Hidden_dim đến 378 (21 * 18)
+
+    def forward(self, x):
+        """
+        :param x: Input tensor có kích thước [batch_size, seq_length, input_dim]
+        """
+        # LSTM/GRU layer
+        lstm_out, _ = self.lstm(x)  # Output có kích thước [batch_size, seq_length, hidden_dim]
+        
+        # Lấy output của phần tử cuối cùng
+        last_output = lstm_out[:, -1, :]  # [batch_size, hidden_dim]
+        
+        # Fully Connected layer
+        output = self.fc(last_output)  # [batch_size, 378]
+        
+        # Reshape output để có kích thước [batch_size, 18, 21]
+        output = output.view(-1, 18, 21)
+        
+        return output
 
 
 class MyModel(nn.Module):
@@ -95,7 +130,7 @@ class MyModel(nn.Module):
         feature_dim = image_embedding.shape[1] // seq_length  # Kích thước của mỗi phần tử chuỗi
         # Reshape tensor để có kích thước [batch_size, seq_length, feature_dim]
         input_tensor_reshaped = image_embedding.view(-1, seq_length, feature_dim)
-        print('input_tensor_reshaped: ', input_tensor_reshaped.shape)
+        #print('input_tensor_reshaped: ', input_tensor_reshaped.shape)
 
         #Xu ly Attribute
         outputAttr, attn_weightsAttr = self.attentionLayerEOA(input_tensor_reshaped)
@@ -201,45 +236,52 @@ def giou_loss(pred_boxes, target_boxes):
 
 
 
-# if __name__ == '__main__':
-#     # # Giả sử d_model = 512, d_k = d_v = 64, và h = 8
-#     d_model = 2560//40 #old = 512
-#     d = 128
-#     d_k = d_v = 64
-#     h = 8
+if __name__ == '__main__':
+    # # Giả sử d_model = 512, d_k = d_v = 64, và h = 8
+    d_model = 2560//40 #old = 512
+    d = 128
+    d_k = d_v = 64
+    h = 8
 
-    # # Khởi tạo mô hình
-    # model = AttentionLayer(d_model, d_k, d_v, h)
+    input_dim = 128
+    hidden_dim = 256  # Giá trị này có thể thay đổi tùy thuộc vào bài toán của bạn
+    output_dim = 15 * 18  # Số lượng tổng cộng các giá trị cần dự đoán
+    num_layers = 2  # Số lớp LSTM
+    dropout_rate = 0.5  # Tỷ lệ dropout
 
-    # # Tạo một batch dữ liệu đầu vào ngẫu nhiên
-    # x = torch.rand(8, 40, 2560//40)  # 5 là batch_size, 10 là seq_len
+    # Khởi tạo mô hình
+    model = AttentionLayer(d_model, d_k, d_v, h)
 
-    # # Chạy mô hình
-    # output, attn_weights = model(x)
+    # Tạo một batch dữ liệu đầu vào ngẫu nhiên
+    x = torch.rand(8, 40, 2560//40)  # 5 là batch_size, 10 là seq_len
 
-    # print(x)
-    # print(output)
-    # print("Output shape:", output.shape)
-    # print("Attention Weights shape:", attn_weights.shape)
+    # Chạy mô hình
+    output, attn_weights = model(x)
+
+    print(x)
+    print(output)
+    print("Output shape:", output.shape)
+    print("Attention Weights shape:", attn_weights.shape)
         
-    # x = torch.randn(8, 3, 224, 224)
+    x = torch.randn(8, 3, 224, 224)
 
-    # y = torch.randn(8,40,128)
+    y = torch.randn(8,40,128)
 
-    # attentionLayer = AttentionLayer(d_model, d_k, d_v, h)
-    # attentionLayerEOA = attentionLayer
-    # attentionLayerEAA = attentionLayer
-    # attentionLayerERA = AttentionLayer(d, d_k, d_v, h)
-    # cnnBackbone = CNNBackbone()
+    attentionLayer = AttentionLayer(d_model, d_k, d_v, h)
+    attentionLayerEOA = attentionLayer
+    attentionLayerEAA = attentionLayer
+    attentionLayerERA = AttentionLayer(d, d_k, d_v, h)
+    cnnBackbone = CNNBackbone()
     # cnnOutput = OutputCNN()
-    # model = MyModel(cnnBackbone,attentionLayerEOA,attentionLayerEAA,attentionLayerERA, cnnOutput)
-    # output= model(x)
-    # print("Output shape:", output.shape)
+    cnnOutput = SequenceModel(input_dim, hidden_dim, output_dim, num_layers, dropout_rate)
+    model = MyModel(cnnBackbone,attentionLayerEOA,attentionLayerEAA,attentionLayerERA, cnnOutput)
+    output= model(x)
+    print("Output shape:", output.shape)
     # print("Output shape y:", y.shape)
-    # print(output[0])
+    print(output[0])
     # print(y[0])
     # gt_bbox = torch.tensor([[1, 2, 3, 4]], dtype=torch.float32)
     # pr_bbox = torch.tensor([[2, 3, 4, 5]], dtype=torch.float32)
     # loss = ComputeGIoU(gt_bbox, pr_bbox, reduction='none')
     # print(loss)
-    # print("Attention Weights shape:", attn_weights.shape)t)
+    # print("Attention Weights shape:", attn_weights.shape)

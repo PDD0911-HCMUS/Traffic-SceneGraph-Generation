@@ -6,6 +6,7 @@ from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
 
 vgRoot = 'Datasets/VisualGenome/'
 
@@ -89,7 +90,8 @@ class DatasetLoader(Dataset):
             attrContext += [newSubBbox+newSubAttr + newObjBbox+newObjAttr]
             label += [[item['id_sub']]+newSubBbox+newSubAttr + [item['id_obj']]+newObjBbox+newObjAttr + [item['rel']]]
 
-        return imageTransform, objetcContext, attrContext, label
+        #return imageTransform, objetcContext, attrContext, label
+        return imageTransform, label
         #return imageTransform, sub,subBbox,attributeSub, obj,objBbox,attributeObj, rel, label
 
 def imshow(img):
@@ -125,12 +127,12 @@ def ResizeAttributeAnno(attr: list):
     """
     Giá trị mặc định của None là 50852
     """
-    if(len(attr) < 5):
+    if(len(attr) < 2):
         attr.append(50852)
         ResizeAttributeAnno(attr)
         return attr
     else:
-        return attr[:5]
+        return attr[:2]
 
 def CheckLenghtLabel(label):
     for item in label:
@@ -143,6 +145,19 @@ def GetAllImage(imageDir):
         #imageList.append(os.path.join(vgRoot + vgImg, item))
         imageList.append(vgRoot + vgImg + '/' + item)
     return imageList[:]
+
+def my_collate_fn(batch):
+    targets = []
+    imgs = []
+
+    for sample in batch:
+        imgs.append(sample[0]) #sample[0]=img
+        targets.append(torch.FloatTensor(sample[1])) # sample[1]=annotation
+    #[3, 300, 300]
+    # (batch_size, 3, 300, 300)
+    imgs = torch.stack(imgs, dim=0)
+
+    return imgs, targets
 
 # trainList = GetAllImage(vgRoot+vgImg)
 
