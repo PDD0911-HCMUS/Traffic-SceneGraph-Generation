@@ -59,7 +59,7 @@ class OutputCNN(nn.Module):
         self.pool = nn.MaxPool1d(kernel_size=2, stride=2, padding=0)
         
         # Lớp Fully Connected để chuyển từ đặc trưng học được sang output 18 chiều
-        self.fc = nn.Linear(32 * (40 // 4), 18)  # Giả định sau 2 lần pooling, kích thước giảm 1 nửa mỗi lần
+        self.fc = nn.Linear(32 * (40 // 4), 18*15)  # Giả định sau 2 lần pooling, kích thước giảm 1 nửa mỗi lần
         
     def forward(self, x):
         # Xử lý qua Conv1d và MaxPool
@@ -69,44 +69,20 @@ class OutputCNN(nn.Module):
         # Flatten đầu ra để sử dụng trong lớp Fully Connected
         x = x.view(x.size(0), -1)  # x.size(0) là batch size
         
-        # Đưa qua lớp Fully Connected để nhận vector output 18 chiều
+        # Đưa qua lớp Fully Connected để nhận vector output 18*15 chiều
         x = self.fc(x)
-        return x
-    
-class SequenceModel(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim, num_layers, dropout_rate):
-        """
-        :param input_dim: Kích thước của mỗi phần tử trong chuỗi (ở đây là 128)
-        :param hidden_dim: Kích thước của hidden state trong LSTM/GRU
-        :param output_dim: Kích thước của output vector (ở đây là 21 * 18 = 378)
-        :param num_layers: Số lượng layers LSTM/GRU
-        :param dropout_rate: Tỷ lệ dropout để ngăn overfitting
-        """
-        super(SequenceModel, self).__init__()
-        
-        # Định nghĩa LSTM layer
-        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True, dropout=dropout_rate)
-        
-        # Định nghĩa lớp Fully Connected
-        self.fc = nn.Linear(hidden_dim, output_dim)  # Hidden_dim đến 378 (21 * 18)
 
-    def forward(self, x):
-        """
-        :param x: Input tensor có kích thước [batch_size, seq_length, input_dim]
-        """
-        # LSTM/GRU layer
-        lstm_out, _ = self.lstm(x)  # Output có kích thước [batch_size, seq_length, hidden_dim]
-        
-        # Lấy output của phần tử cuối cùng
-        last_output = lstm_out[:, -1, :]  # [batch_size, hidden_dim]
-        
-        # Fully Connected layer
-        output = self.fc(last_output)  # [batch_size, 378]
-        
-        # Reshape output để có kích thước [batch_size, 18, 21]
-        output = output.view(-1, 18, 21)
-        
-        return output
+        # x = divide_chunks(x, n=18)
+        # sub = [x[0]]
+        # sub_box = x[1:5]
+        # sub_att = x[5:7]
+
+        # obj = [x[7]]
+        # obj_bbox = x[8:12]
+        # obj_att = x[12:14]
+
+        # rel = [x[-1]]
+        return x
 
 
 class MyModel(nn.Module):
@@ -145,7 +121,16 @@ class MyModel(nn.Module):
 
         output = self.outputCNN(outputTar)
 
+        output = [item.unfold(dimension = 0,size = 15, step = 15) for item in output]
+        #output = divide_chunks(output, n=15)
+
         return output
+
+def divide_chunks(l, n): 
+      
+    # looping till length l 
+    for i in range(0, len(l), n):  
+        yield l[i:i + n] 
 
 def ComputeGIoU(pred, grt, reduction='mean'):
     """
@@ -236,49 +221,46 @@ def giou_loss(pred_boxes, target_boxes):
 
 
 
-if __name__ == '__main__':
-    # # Giả sử d_model = 512, d_k = d_v = 64, và h = 8
-    d_model = 2560//40 #old = 512
-    d = 128
-    d_k = d_v = 64
-    h = 8
+# if __name__ == '__main__':
+#     # # Giả sử d_model = 512, d_k = d_v = 64, và h = 8
+#     d_model = 2560//40 #old = 512
+#     d = 128
+#     d_k = d_v = 64
+#     h = 8
 
-    input_dim = 128
-    hidden_dim = 256  # Giá trị này có thể thay đổi tùy thuộc vào bài toán của bạn
-    output_dim = 15 * 18  # Số lượng tổng cộng các giá trị cần dự đoán
-    num_layers = 2  # Số lớp LSTM
-    dropout_rate = 0.5  # Tỷ lệ dropout
+    # # Khởi tạo mô hình
+    # model = AttentionLayer(d_model, d_k, d_v, h)
 
-    # Khởi tạo mô hình
-    model = AttentionLayer(d_model, d_k, d_v, h)
+    # # Tạo một batch dữ liệu đầu vào ngẫu nhiên
+    # x = torch.rand(8, 40, 2560//40)  # 5 là batch_size, 10 là seq_len
 
-    # Tạo một batch dữ liệu đầu vào ngẫu nhiên
-    x = torch.rand(8, 40, 2560//40)  # 5 là batch_size, 10 là seq_len
+    # # Chạy mô hình
+    # output, attn_weights = model(x)
 
-    # Chạy mô hình
-    output, attn_weights = model(x)
-
-    print(x)
-    print(output)
-    print("Output shape:", output.shape)
-    print("Attention Weights shape:", attn_weights.shape)
+    # print(x)
+    # print(output)
+    # print("Output shape:", output.shape)
+    # print("Attention Weights shape:", attn_weights.shape)
         
-    x = torch.randn(8, 3, 224, 224)
+    # x = torch.randn(8, 3, 224, 224)
 
-    y = torch.randn(8,40,128)
+    # y = torch.randn(8,40,128)
 
-    attentionLayer = AttentionLayer(d_model, d_k, d_v, h)
-    attentionLayerEOA = attentionLayer
-    attentionLayerEAA = attentionLayer
-    attentionLayerERA = AttentionLayer(d, d_k, d_v, h)
-    cnnBackbone = CNNBackbone()
+    # attentionLayer = AttentionLayer(d_model, d_k, d_v, h)
+    # attentionLayerEOA = attentionLayer
+    # attentionLayerEAA = attentionLayer
+    # attentionLayerERA = AttentionLayer(d, d_k, d_v, h)
+    # cnnBackbone = CNNBackbone()
     # cnnOutput = OutputCNN()
-    cnnOutput = SequenceModel(input_dim, hidden_dim, output_dim, num_layers, dropout_rate)
-    model = MyModel(cnnBackbone,attentionLayerEOA,attentionLayerEAA,attentionLayerERA, cnnOutput)
-    output= model(x)
-    print("Output shape:", output.shape)
-    # print("Output shape y:", y.shape)
-    print(output[0])
+    # #cnnOutput = SequenceModel(input_dim, hidden_dim, output_dim, num_layers, dropout_rate)
+    # model = MyModel(cnnBackbone,attentionLayerEOA,attentionLayerEAA,attentionLayerERA, cnnOutput)
+    # output= model(x)
+    # print(output)
+    # print(len(output))
+    # print("Output shape:", output[0].shape)
+
+    # # print("Output shape y:", y.shape)
+    # print(output[0])
     # print(y[0])
     # gt_bbox = torch.tensor([[1, 2, 3, 4]], dtype=torch.float32)
     # pr_bbox = torch.tensor([[2, 3, 4, 5]], dtype=torch.float32)
