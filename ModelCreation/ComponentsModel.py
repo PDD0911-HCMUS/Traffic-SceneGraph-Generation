@@ -85,8 +85,79 @@ class OutputCNN(nn.Module):
         return x
 
 
+class OutputCoor(nn.Module):
+    def __init__(self):
+        super(OutputCoor, self).__init__()
+        # Định nghĩa các lớp Conv1d
+        self.conv1 = nn.Conv2d(in_channels=128, out_channels=64, kernel_size=3, stride=1, padding=1)
+        self.conv2 = nn.Conv2d(in_channels=64, out_channels=32, kernel_size=3, stride=1, padding=1)
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+        
+        # Lớp Fully Connected để chuyển từ đặc trưng học được sang output 18 chiều
+        self.fc = nn.Linear(32 * (40 // 4), 18*5*2)  # Giả định sau 2 lần pooling, kích thước giảm 1 nửa mỗi lần
+        
+    def forward(self, x):
+        # Xử lý qua Conv1d và MaxPool
+        x = self.pool(F.relu(self.conv1(x)))
+        x = self.pool(F.relu(self.conv2(x)))
+        
+        # Flatten đầu ra để sử dụng trong lớp Fully Connected
+        x = x.view(x.size(0), -1)  # x.size(0) là batch size
+        
+        # Đưa qua lớp Fully Connected để nhận vector output 18*15 chiều
+        x = self.fc(x)
+
+        return x
+    
+class OutputAttr(nn.Module):
+    def __init__(self):
+        super(OutputAttr, self).__init__()
+        # Định nghĩa các lớp Conv1d
+        self.conv1 = nn.Conv2d(in_channels=128, out_channels=64, kernel_size=3, stride=1, padding=1)
+        self.conv2 = nn.Conv2d(in_channels=64, out_channels=32, kernel_size=3, stride=1, padding=1)
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+        
+        # Lớp Fully Connected để chuyển từ đặc trưng học được sang output 18 chiều
+        self.fc = nn.Linear(32 * (40 // 4), 18*8*4)  # Giả định sau 2 lần pooling, kích thước giảm 1 nửa mỗi lần
+        
+    def forward(self, x):
+        # Xử lý qua Conv1d và MaxPool
+        x = self.pool(F.relu(self.conv1(x)))
+        x = self.pool(F.relu(self.conv2(x)))
+        
+        # Flatten đầu ra để sử dụng trong lớp Fully Connected
+        x = x.view(x.size(0), -1)  # x.size(0) là batch size
+        
+        # Đưa qua lớp Fully Connected để nhận vector output 18*15 chiều
+        x = self.fc(x)
+
+        return x
+    
+class OutputAttr(nn.Module):
+    def __init__(self):
+        super(OutputAttr, self).__init__()
+        # Định nghĩa các lớp Conv1d
+        self.conv1 = nn.Conv2d(in_channels=128, out_channels=64, kernel_size=3, stride=1, padding=1)
+        self.conv2 = nn.Conv2d(in_channels=64, out_channels=32, kernel_size=3, stride=1, padding=1)
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+        
+        # Lớp Fully Connected để chuyển từ đặc trưng học được sang output 18 chiều
+        self.fc = nn.Linear(32 * (40 // 4), 18*8*8)  # Giả định sau 2 lần pooling, kích thước giảm 1 nửa mỗi lần
+        
+    def forward(self, x):
+        # Xử lý qua Conv1d và MaxPool
+        x = self.pool(F.relu(self.conv1(x)))
+        x = self.pool(F.relu(self.conv2(x)))
+        
+        # Flatten đầu ra để sử dụng trong lớp Fully Connected
+        x = x.view(x.size(0), -1)  # x.size(0) là batch size
+        
+        # Đưa qua lớp Fully Connected để nhận vector output 18*15 chiều
+        x = self.fc(x)
+
+        return x
 class MyModel(nn.Module):
-    def __init__(self, cnnBackbone, attentionLayerEOA, attentionLayerEAA, attentionLayerERA, outputCNN):
+    def __init__(self, cnnBackbone, attentionLayerEOA, attentionLayerEAA, attentionLayerERA, outputCoor, outputAttr, outputRel):
         super(MyModel, self).__init__()
         # d_model = 512
         # d_k = d_v = 64
@@ -96,7 +167,10 @@ class MyModel(nn.Module):
         self.attentionLayerEOA = attentionLayerEOA
         self.attentionLayerEAA = attentionLayerEAA
         self.attentionLayerERA = attentionLayerERA
-        self.outputCNN = outputCNN
+
+        self.outputCoor = outputCoor
+        self.outputAttr = outputAttr
+        self.outputRel = outputRel
     
     def forward(self, x):
 
