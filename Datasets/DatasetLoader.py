@@ -68,6 +68,7 @@ class DatasetLoader(Dataset):
         
         sub,subBbox,attributeSub, obj,objBbox,attributeObj, rel = [],[],[], [],[],[], [] 
         objetcContext, attrContext, label = [],[],[]
+        labelCouple, labelCoupleAttr, labelRel = [],[],[]
 
         for item in annotation:
             newSubBbox = ResizeBbox(item['sub_bbox'],originalSize, resize)
@@ -76,22 +77,27 @@ class DatasetLoader(Dataset):
             newSubAttr = ResizeAttributeAnno(item['att_sub'])
             newObjAttr = ResizeAttributeAnno(item['att_obj'])
 
-            sub.append(item['id_sub'])
-            subBbox.append(newSubBbox)
-            attributeSub.append(item['att_sub'])
+            # sub.append(item['id_sub'])
+            # subBbox.append(newSubBbox)
+            # attributeSub.append(item['att_sub'])
 
-            obj.append(item['id_obj'])
-            objBbox.append(newObjBbox)
-            attributeObj.append(item['att_obj'])
+            # obj.append(item['id_obj'])
+            # objBbox.append(newObjBbox)
+            # attributeObj.append(item['att_obj'])
 
-            rel.append(item['rel'])
+            # rel.append(item['rel'])
 
-            objetcContext += [[item['id_sub']] + newSubBbox+[item['id_obj']]+newObjBbox]
-            attrContext += [newSubBbox+newSubAttr + newObjBbox+newObjAttr]
+            # objetcContext += [[item['id_sub']] + newSubBbox+[item['id_obj']]+newObjBbox]
+            # attrContext += [newSubBbox+newSubAttr + newObjBbox+newObjAttr]
+
             label += [[item['id_sub']]+newSubBbox+newSubAttr + [item['id_obj']]+newObjBbox+newObjAttr + [item['rel']]]
 
+            labelCouple += [[item['id_sub']]+newSubBbox + [item['id_obj']]+newObjBbox]
+            labelCoupleAttr += [[item['id_sub']]+newSubBbox+newSubAttr + [item['id_obj']]+newObjBbox+newObjAttr]
+            labelRel += [[item['id_sub']]+newSubBbox + [item['id_obj']]+newObjBbox + [item['rel']]]
+
         #return imageTransform, objetcContext, attrContext, label
-        return imageTransform, label
+        return imageTransform, label, labelCouple, labelCoupleAttr, labelRel
         #return imageTransform, sub,subBbox,attributeSub, obj,objBbox,attributeObj, rel, label
 
 def imshow(img):

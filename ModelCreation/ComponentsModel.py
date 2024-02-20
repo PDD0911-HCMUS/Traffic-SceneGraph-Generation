@@ -84,7 +84,6 @@ class OutputCNN(nn.Module):
         # rel = [x[-1]]
         return x
 
-
 class OutputCoor(nn.Module):
     def __init__(self):
         super(OutputCoor, self).__init__()
@@ -176,6 +175,12 @@ class MyModel(nn.Module):
 
         image_embedding = self.cnnBackbone(x)
 
+        q_cp = torch.randn(image_embedding.size())
+        q_attr = torch.randn(image_embedding.size())
+
+        image_embedding_cp = image_embedding + q_cp
+        image_embedding_attr = image_embedding_cp + q_attr
+
         seq_length = 40  # Số lượng phần tử trong chuỗi
         feature_dim = image_embedding.shape[1] // seq_length  # Kích thước của mỗi phần tử chuỗi
         # Reshape tensor để có kích thước [batch_size, seq_length, feature_dim]
@@ -238,8 +243,6 @@ def ComputeGIoU(pred, grt, reduction='mean'):
     elif reduction == 'none':
         pass
     return loss
-
-import torch
 
 def original_giou_loss(pred_boxes, target_boxes):
     """
