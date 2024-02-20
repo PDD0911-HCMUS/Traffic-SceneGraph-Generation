@@ -3,6 +3,9 @@ from torch import nn
 from efficientnet_pytorch import EfficientNet
 import torch.nn.functional as F
 import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 
 class CNNBackbone(nn.Module):
     def __init__(self):
@@ -15,171 +18,90 @@ class CNNBackbone(nn.Module):
         global_features = global_features.view(global_features.size(0), -1)
         return global_features
 
-class AttentionLayer(torch.nn.Module):
-    def __init__(self, d_model, d_k, d_v, h):
-        super(AttentionLayer, self).__init__()
-        self.d_k = d_k
-        self.d_v = d_v
-        self.h = h
+class EsitmateAttributeAttentionLayer(torch.nn.Module):
+    def __init__(self, feature_dim, hidden_dim):
+        super(EsitmateAttributeAttentionLayer, self).__init__()
+        self.feature_dim = feature_dim
+        self.hidden_dim = hidden_dim
         
-        # Khởi tạo ma trận trọng số cho W^Q, W^K, W^V
-        self.W_q = torch.nn.Linear(d_model, d_k * h, bias=False)
-        self.W_k = torch.nn.Linear(d_model, d_k * h, bias=False)
-        self.W_v = torch.nn.Linear(d_model, d_v * h, bias=False)
-
-        # Linear layer để kết hợp các đầu ra từ các heads
-        self.linear = torch.nn.Linear(d_v * h, d_model)
-
+        # Khởi tạo ma trận trọng số cho Q, K, V
+        self.W_q = nn.Linear(feature_dim, hidden_dim, bias=False)
+        self.W_k = nn.Linear(feature_dim, hidden_dim, bias=False)
+        self.W_v = nn.Linear(feature_dim, hidden_dim, bias=False)
+        self.q = nn.Linear(feature_dim, hidden_dim, bias=False)
+        
     def forward(self, x):
-        batch_size = x.size(0)
+        # Biến đổi x qua W_q, W_k, W_v
+        Q = self.W_q(x)
+        K = self.W_k(x)
+        q = self.q(x)
+        V = self.W_v(x) + q
         
-        # Biến đổi x qua W^Q, W^K, W^V
-        Q = self.W_q(x).view(batch_size, -1, self.h, self.d_k).transpose(1, 2)  # [batch_size, h, seq_len, d_k]
-        K = self.W_k(x).view(batch_size, -1, self.h, self.d_k).transpose(1, 2)
-        V = self.W_v(x).view(batch_size, -1, self.h, self.d_v).transpose(1, 2)
-        
-        # Tính attention scores
-        scores = torch.matmul(Q, K.transpose(-2, -1)) / np.sqrt(self.d_k)
-        attn = F.softmax(scores, dim=-1)
+        # Tính điểm attention
+        attention_scores = torch.matmul(Q, K.transpose(-2, -1)) / (self.hidden_dim ** 0.5)
+        attention_weights = F.softmax(attention_scores, dim=-1)
         
         # Áp dụng attention lên V
-        context = torch.matmul(attn, V).transpose(1, 2).contiguous().view(batch_size, -1, self.h * self.d_v)
+        output = torch.matmul(attention_weights, V)
         
-        # Kết hợp các heads
-        output = self.linear(context)
-        
-        return output, attn
-
-class OutputCNN(nn.Module):
-    def __init__(self):
-        super(OutputCNN, self).__init__()
-        # Định nghĩa các lớp Conv1d
-        self.conv1 = nn.Conv1d(in_channels=128, out_channels=64, kernel_size=3, stride=1, padding=1)
-        self.conv2 = nn.Conv1d(in_channels=64, out_channels=32, kernel_size=3, stride=1, padding=1)
-        self.pool = nn.MaxPool1d(kernel_size=2, stride=2, padding=0)
-        
-        # Lớp Fully Connected để chuyển từ đặc trưng học được sang output 18 chiều
-        self.fc = nn.Linear(32 * (40 // 4), 18*15)  # Giả định sau 2 lần pooling, kích thước giảm 1 nửa mỗi lần
-        
-    def forward(self, x):
-        # Xử lý qua Conv1d và MaxPool
-        x = self.pool(F.relu(self.conv1(x)))
-        x = self.pool(F.relu(self.conv2(x)))
-        
-        # Flatten đầu ra để sử dụng trong lớp Fully Connected
-        x = x.view(x.size(0), -1)  # x.size(0) là batch size
-        
-        # Đưa qua lớp Fully Connected để nhận vector output 18*15 chiều
-        x = self.fc(x)
-
-        # x = divide_chunks(x, n=18)
-        # sub = [x[0]]
-        # sub_box = x[1:5]
-        # sub_att = x[5:7]
-
-        # obj = [x[7]]
-        # obj_bbox = x[8:12]
-        # obj_att = x[12:14]
-
-        # rel = [x[-1]]
-        return x
-
-class OutputCoor(nn.Module):
-    def __init__(self):
-        super(OutputCoor, self).__init__()
-        # Định nghĩa các lớp Conv1d
-        self.conv1 = nn.Conv2d(in_channels=128, out_channels=64, kernel_size=3, stride=1, padding=1)
-        self.conv2 = nn.Conv2d(in_channels=64, out_channels=32, kernel_size=3, stride=1, padding=1)
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
-        
-        # Lớp Fully Connected để chuyển từ đặc trưng học được sang output 18 chiều
-        self.fc = nn.Linear(32 * (40 // 4), 18*5*2)  # Giả định sau 2 lần pooling, kích thước giảm 1 nửa mỗi lần
-        
-    def forward(self, x):
-        # Xử lý qua Conv1d và MaxPool
-        x = self.pool(F.relu(self.conv1(x)))
-        x = self.pool(F.relu(self.conv2(x)))
-        
-        # Flatten đầu ra để sử dụng trong lớp Fully Connected
-        x = x.view(x.size(0), -1)  # x.size(0) là batch size
-        
-        # Đưa qua lớp Fully Connected để nhận vector output 18*15 chiều
-        x = self.fc(x)
-
-        return x
+        return output, attention_weights
     
-class OutputAttr(nn.Module):
-    def __init__(self):
-        super(OutputAttr, self).__init__()
-        # Định nghĩa các lớp Conv1d
-        self.conv1 = nn.Conv2d(in_channels=128, out_channels=64, kernel_size=3, stride=1, padding=1)
-        self.conv2 = nn.Conv2d(in_channels=64, out_channels=32, kernel_size=3, stride=1, padding=1)
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+class EstimateCoupleAttentionLayer(torch.nn.Module):
+    def __init__(self, feature_dim, hidden_dim):
+        super(EstimateCoupleAttentionLayer, self).__init__()
+        self.feature_dim = feature_dim
+        self.hidden_dim = hidden_dim
         
-        # Lớp Fully Connected để chuyển từ đặc trưng học được sang output 18 chiều
-        self.fc = nn.Linear(32 * (40 // 4), 18*8*4)  # Giả định sau 2 lần pooling, kích thước giảm 1 nửa mỗi lần
+        # Khởi tạo ma trận trọng số cho Q, K, V
+        self.W_q = nn.Linear(feature_dim, hidden_dim, bias=False)
+        self.W_k = nn.Linear(feature_dim, hidden_dim, bias=False)
+        self.W_v = nn.Linear(feature_dim, hidden_dim, bias=False)
+        self.q = nn.Linear(feature_dim, hidden_dim, bias=False)
         
     def forward(self, x):
-        # Xử lý qua Conv1d và MaxPool
-        x = self.pool(F.relu(self.conv1(x)))
-        x = self.pool(F.relu(self.conv2(x)))
+        # Biến đổi x qua W_q, W_k, W_v
+        Q = self.W_q(x)
+        K = self.W_k(x)
+        q = self.q(x)
+        V = self.W_v(x) + q
         
-        # Flatten đầu ra để sử dụng trong lớp Fully Connected
-        x = x.view(x.size(0), -1)  # x.size(0) là batch size
+        # Tính điểm attention
+        attention_scores = torch.matmul(Q, K.transpose(-2, -1)) / (self.hidden_dim ** 0.5)
+        attention_weights = F.softmax(attention_scores, dim=-1)
         
-        # Đưa qua lớp Fully Connected để nhận vector output 18*15 chiều
-        x = self.fc(x)
+        # Áp dụng attention lên V
+        output = torch.matmul(attention_weights, V)
+        
+        return output, attention_weights
 
-        return x
-    
-class OutputAttr(nn.Module):
+class FFNCoupleRegr(nn.Module):
     def __init__(self):
-        super(OutputAttr, self).__init__()
+        super(FFNCoupleRegr, self).__init__()
         # Định nghĩa các lớp Conv1d
-        self.conv1 = nn.Conv2d(in_channels=128, out_channels=64, kernel_size=3, stride=1, padding=1)
-        self.conv2 = nn.Conv2d(in_channels=64, out_channels=32, kernel_size=3, stride=1, padding=1)
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
-        
-        # Lớp Fully Connected để chuyển từ đặc trưng học được sang output 18 chiều
-        self.fc = nn.Linear(32 * (40 // 4), 18*8*8)  # Giả định sau 2 lần pooling, kích thước giảm 1 nửa mỗi lần
+        self.fc1 = nn.Linear(1024, 512)  # Giảm kích thước xuống
+        self.fc2 = nn.Linear(512, 256)   # Tiếp tục giảm kích thước
+        self.fc3 = nn.Linear(256, 180)   # 180 đơn vị đầu ra cho 18 cặp bounding box
         
     def forward(self, x):
-        # Xử lý qua Conv1d và MaxPool
-        x = self.pool(F.relu(self.conv1(x)))
-        x = self.pool(F.relu(self.conv2(x)))
-        
-        # Flatten đầu ra để sử dụng trong lớp Fully Connected
-        x = x.view(x.size(0), -1)  # x.size(0) là batch size
-        
-        # Đưa qua lớp Fully Connected để nhận vector output 18*15 chiều
-        x = self.fc(x)
+        # Truyền qua các tầng Fully Connected với hàm kích hoạt ReLU
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = self.fc3(x)  # Không sử dụng hàm kích hoạt ở tầng cuối cùng
 
         return x
 class MyModel(nn.Module):
-    def __init__(self, cnnBackbone, attentionLayerEOA, attentionLayerEAA, attentionLayerERA, outputCoor, outputAttr, outputRel):
+    def __init__(self, cnnBackbone, attentionLayerEOA, attentionLayerEAA, ffnCp):
         super(MyModel, self).__init__()
-        # d_model = 512
-        # d_k = d_v = 64
-        # h = 8
 
         self.cnnBackbone = cnnBackbone
         self.attentionLayerEOA = attentionLayerEOA
         self.attentionLayerEAA = attentionLayerEAA
-        self.attentionLayerERA = attentionLayerERA
 
-        self.outputCoor = outputCoor
-        self.outputAttr = outputAttr
-        self.outputRel = outputRel
+        self.ffnCp = ffnCp
     
     def forward(self, x):
 
         image_embedding = self.cnnBackbone(x)
-
-        q_cp = torch.randn(image_embedding.size())
-        q_attr = torch.randn(image_embedding.size())
-
-        image_embedding_cp = image_embedding + q_cp
-        image_embedding_attr = image_embedding_cp + q_attr
 
         seq_length = 40  # Số lượng phần tử trong chuỗi
         feature_dim = image_embedding.shape[1] // seq_length  # Kích thước của mỗi phần tử chuỗi
@@ -188,22 +110,15 @@ class MyModel(nn.Module):
         #print('input_tensor_reshaped: ', input_tensor_reshaped.shape)
 
         #Xu ly Attribute
-        outputAttr, attn_weightsAttr = self.attentionLayerEOA(input_tensor_reshaped)
+        outputAttr, attn_weightsAttr = self.attentionLayerEOA(image_embedding)
         #Xu ly Relation
-        outputRel, attn_weightsRel = self.attentionLayerEAA(input_tensor_reshaped)
+        outputRel, attn_weightsRel = self.attentionLayerEAA(image_embedding)
         #Xu ly dau ra
         outConcat = torch.cat((outputAttr, outputRel),-1)
 
-        outputTar, attn_weightsTar = self.attentionLayerERA(outConcat)
+        bboxCp = self.ffnCp(outConcat)
 
-        outputTar = outputTar.permute(0, 2, 1)
-
-        output = self.outputCNN(outputTar)
-
-        output = [item.unfold(dimension = 0,size = 15, step = 15) for item in output]
-        #output = divide_chunks(output, n=15)
-
-        return output
+        return bboxCp
 
 def divide_chunks(l, n): 
       
@@ -298,49 +213,45 @@ def giou_loss(pred_boxes, target_boxes):
 
 
 
-# if __name__ == '__main__':
-#     # # Giả sử d_model = 512, d_k = d_v = 64, và h = 8
-#     d_model = 2560//40 #old = 512
-#     d = 128
-#     d_k = d_v = 64
-#     h = 8
+if __name__ == '__main__':
+    x = torch.randn(8, 3, 224, 224)
 
-    # # Khởi tạo mô hình
-    # model = AttentionLayer(d_model, d_k, d_v, h)
+    # Try CNN Backbone
+    cnnBackbone = CNNBackbone()
+    outCNN = cnnBackbone(x)
+    print("output CNN: ", outCNN.size())
 
-    # # Tạo một batch dữ liệu đầu vào ngẫu nhiên
-    # x = torch.rand(8, 40, 2560//40)  # 5 là batch_size, 10 là seq_len
+    #Try EstimateCoupleAttentionLayer
+    feature_dim = outCNN.size(1)
+    hidden_dim = 512
 
-    # # Chạy mô hình
-    # output, attn_weights = model(x)
+    attCplayer = EstimateCoupleAttentionLayer(feature_dim, hidden_dim)
+    outputCpAtt, attention_weights = attCplayer(outCNN)
+    print("output Couple Attention: ", outputCpAtt.size())
+    #print(outputCpAtt)
 
-    # print(x)
-    # print(output)
-    # print("Output shape:", output.shape)
-    # print("Attention Weights shape:", attn_weights.shape)
-        
-    # x = torch.randn(8, 3, 224, 224)
+    #Try EsitmateAttributeAttentionLayer
+    feature_dim = outCNN.size(1)
+    hidden_dim = 512
 
-    # y = torch.randn(8,40,128)
+    attAttlayer = EsitmateAttributeAttentionLayer(feature_dim, hidden_dim)
+    outputAttAtt, attention_weights = attAttlayer(outCNN)
+    print("output Attribute Attention: ", outputAttAtt.size())
+    #print(outputAttAtt)
 
-    # attentionLayer = AttentionLayer(d_model, d_k, d_v, h)
-    # attentionLayerEOA = attentionLayer
-    # attentionLayerEAA = attentionLayer
-    # attentionLayerERA = AttentionLayer(d, d_k, d_v, h)
-    # cnnBackbone = CNNBackbone()
-    # cnnOutput = OutputCNN()
-    # #cnnOutput = SequenceModel(input_dim, hidden_dim, output_dim, num_layers, dropout_rate)
-    # model = MyModel(cnnBackbone,attentionLayerEOA,attentionLayerEAA,attentionLayerERA, cnnOutput)
-    # output= model(x)
-    # print(output)
-    # print(len(output))
-    # print("Output shape:", output[0].shape)
+    #Try FFN BBox for couple
+    outConcat = torch.cat((outputCpAtt, outputAttAtt),-1)
+    print("outConcat: ",outConcat.size())
+    ffnCp = FFNCoupleRegr()
+    bboxCp = ffnCp(outConcat)
+    print(bboxCp.size())
+    print(attention_weights[0])
 
-    # # print("Output shape y:", y.shape)
-    # print(output[0])
-    # print(y[0])
-    # gt_bbox = torch.tensor([[1, 2, 3, 4]], dtype=torch.float32)
-    # pr_bbox = torch.tensor([[2, 3, 4, 5]], dtype=torch.float32)
-    # loss = ComputeGIoU(gt_bbox, pr_bbox, reduction='none')
-    # print(loss)
-    # print("Attention Weights shape:", attn_weights.shape)
+    # attention_map = attention_weights[0].cpu().detach().numpy()  # Chuyển tensor sang numpy array
+
+    # plt.figure(figsize=(10, 8))
+    # sns.heatmap(attention_map, cmap='viridis', annot=True)
+    # plt.title("Attention Weights Heatmap")
+    # plt.xlabel("Key Positions")
+    # plt.ylabel("Query Positions")
+    # plt.show()
