@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import math
 
 
 class CNNBackbone(nn.Module):
@@ -17,6 +18,22 @@ class CNNBackbone(nn.Module):
         global_features = F.adaptive_avg_pool2d(features, 1)
         global_features = global_features.view(global_features.size(0), -1)
         return global_features
+    
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, max_seq_length):
+        super(PositionalEncoding, self).__init__()
+        
+        pe = torch.zeros(max_seq_length, d_model)
+        position = torch.arange(0, max_seq_length, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * -(math.log(10000.0) / d_model))
+        
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        
+        self.register_buffer('pe', pe.unsqueeze(0))
+        
+    def forward(self, x):
+        return x + self.pe[:, :x.size(1)]
 
 class EsitmateAttributeAttentionLayer(torch.nn.Module):
     def __init__(self, feature_dim, hidden_dim):
@@ -49,7 +66,7 @@ class EsitmateAttributeAttentionLayer(torch.nn.Module):
 class EstimateCoupleAttentionLayer(torch.nn.Module):
     def __init__(self, feature_dim, hidden_dim):
         super(EstimateCoupleAttentionLayer, self).__init__()
-        self.feature_dim = feature_dim
+        self.feature_dim = feature_dim    
         self.hidden_dim = hidden_dim
         
         # Khởi tạo ma trận trọng số cho Q, K, V
@@ -116,9 +133,14 @@ class MyModel(nn.Module):
         #Xu ly dau ra
         outConcat = torch.cat((outputAttr, outputRel),-1)
 
+        out = {
+            'attribute': outputAttr,
+            'relation': outputRel
+        }
+
         bboxCp = self.ffnCp(outConcat)
 
-        return bboxCp
+        return out
 
 def divide_chunks(l, n): 
       
@@ -214,7 +236,7 @@ def giou_loss(pred_boxes, target_boxes):
 
 
 if __name__ == '__main__':
-    x = torch.randn(8, 3, 224, 224)
+    x = torch.randn(2, 3, 224, 224)
 
     # Try CNN Backbone
     cnnBackbone = CNNBackbone()
@@ -247,11 +269,3 @@ if __name__ == '__main__':
     print(bboxCp.size())
     print(attention_weights[0])
 
-    # attention_map = attention_weights[0].cpu().detach().numpy()  # Chuyển tensor sang numpy array
-
-    # plt.figure(figsize=(10, 8))
-    # sns.heatmap(attention_map, cmap='viridis', annot=True)
-    # plt.title("Attention Weights Heatmap")
-    # plt.xlabel("Key Positions")
-    # plt.ylabel("Query Positions")
-    # plt.show()

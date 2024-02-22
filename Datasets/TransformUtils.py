@@ -1,417 +1,276 @@
+# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+"""
+Transforms and data augmentation for both image + bbox.
+"""
+import random
+
+import PIL
 import torch
-from torchvision import transforms
-import cv2
-import numpy as np
-import types
-from numpy import random
+import torchvision.transforms as T
+import torchvision.transforms.functional as F
+
+from Util import box_xyxy_to_cxcywh
+from Util import interpolate
 
 
-def intersect(box_a, box_b):
-    max_xy = np.minimum(box_a[:, 2:], box_b[2:])
-    min_xy = np.maximum(box_a[:, :2], box_b[:2])
-    inter = np.clip((max_xy - min_xy), a_min=0, a_max=np.inf)
-    return inter[:, 0] * inter[:, 1]
+def crop(image, target, region):
+    cropped_image = F.crop(image, *region)
+
+    target = target.copy()
+    i, j, h, w = region
+
+    # should we do something wrt the original size?
+    target["size"] = torch.tensor([h, w])
+
+    fields = ["labels", "area", "iscrowd"]
+
+    if "boxes" in target:
+        boxes = target["boxes"]
+        max_size = torch.as_tensor([w, h], dtype=torch.float32)
+        cropped_boxes = boxes - torch.as_tensor([j, i, j, i])
+        cropped_boxes = torch.min(cropped_boxes.reshape(-1, 2, 2), max_size)
+        cropped_boxes = cropped_boxes.clamp(min=0)
+        area = (cropped_boxes[:, 1, :] - cropped_boxes[:, 0, :]).prod(dim=1)
+        target["boxes"] = cropped_boxes.reshape(-1, 4)
+        target["area"] = area
+        fields.append("boxes")
+
+    if "masks" in target:
+        # FIXME should we update the area here if there are no boxes?
+        target['masks'] = target['masks'][:, i:i + h, j:j + w]
+        fields.append("masks")
+
+    # remove elements for which the boxes or masks that have zero area
+    if "boxes" in target or "masks" in target:
+        # favor boxes selection when defining which elements to keep
+        # this is compatible with previous implementation
+        if "boxes" in target:
+            cropped_boxes = target['boxes'].reshape(-1, 2, 2)
+            keep = torch.all(cropped_boxes[:, 1, :] > cropped_boxes[:, 0, :], dim=1)
+        else:
+            keep = target['masks'].flatten(1).any(1)
+
+        for field in fields:
+            target[field] = target[field][keep]
+
+    return cropped_image, target
 
 
-def jaccard_numpy(box_a, box_b):
-    """Compute the jaccard overlap of two sets of boxes.  The jaccard overlap
-    is simply the intersection over union of two boxes.
-    E.g.:
-        A ∩ B / A ∪ B = A ∩ B / (area(A) + area(B) - A ∩ B)
-    Args:
-        box_a: Multiple bounding boxes, Shape: [num_boxes,4]
-        box_b: Single bounding box, Shape: [4]
-    Return:
-        jaccard overlap: Shape: [box_a.shape[0], box_a.shape[1]]
-    """
-    inter = intersect(box_a, box_b)
-    area_a = ((box_a[:, 2]-box_a[:, 0]) *
-              (box_a[:, 3]-box_a[:, 1]))  # [A,B]
-    area_b = ((box_b[2]-box_b[0]) *
-              (box_b[3]-box_b[1]))  # [A,B]
-    union = area_a + area_b - inter
-    return inter / union  # [A,B]
+def hflip(image, target):
+    flipped_image = F.hflip(image)
+
+    w, h = image.size
+
+    target = target.copy()
+    if "boxes" in target:
+        boxes = target["boxes"]
+        boxes = boxes[:, [2, 1, 0, 3]] * torch.as_tensor([-1, 1, -1, 1]) + torch.as_tensor([w, 0, w, 0])
+        target["boxes"] = boxes
+
+    if "masks" in target:
+        target['masks'] = target['masks'].flip(-1)
+
+    return flipped_image, target
 
 
-class Compose(object):
-    """Composes several augmentations together.
-    Args:
-        transforms (List[Transform]): list of transforms to compose.
-    Example:
-        >>> augmentations.Compose([
-        >>>     transforms.CenterCrop(10),
-        >>>     transforms.ToTensor(),
-        >>> ])
-    """
+def resize(image, target, size, max_size=None):
+    # size can be min_size (scalar) or (w, h) tuple
 
-    def __init__(self, transforms):
-        self.transforms = transforms
+    def get_size_with_aspect_ratio(image_size, size, max_size=None):
+        w, h = image_size
+        if max_size is not None:
+            min_original_size = float(min((w, h)))
+            max_original_size = float(max((w, h)))
+            if max_original_size / min_original_size * size > max_size:
+                size = int(round(max_size * min_original_size / max_original_size))
 
-    def __call__(self, img, boxes=None, labels=None):
-        for t in self.transforms:
-            img, boxes, labels = t(img, boxes, labels)
-        return img, boxes, labels
+        if (w <= h and w == size) or (h <= w and h == size):
+            return (h, w)
 
+        if w < h:
+            ow = size
+            oh = int(size * h / w)
+        else:
+            oh = size
+            ow = int(size * w / h)
 
-class Lambda(object):
-    """Applies a lambda as a transform."""
+        return (oh, ow)
 
-    def __init__(self, lambd):
-        assert isinstance(lambd, types.LambdaType)
-        self.lambd = lambd
+    def get_size(image_size, size, max_size=None):
+        if isinstance(size, (list, tuple)):
+            return size[::-1]
+        else:
+            return get_size_with_aspect_ratio(image_size, size, max_size)
 
-    def __call__(self, img, boxes=None, labels=None):
-        return self.lambd(img, boxes, labels)
+    size = get_size(image.size, size, max_size)
+    rescaled_image = F.resize(image, size)
 
+    if target is None:
+        return rescaled_image, None
 
-class ConvertFromInts(object):
-    def __call__(self, image, boxes=None, labels=None):
-        return image.astype(np.float32), boxes, labels
+    ratios = tuple(float(s) / float(s_orig) for s, s_orig in zip(rescaled_image.size, image.size))
+    ratio_width, ratio_height = ratios
 
+    target = target.copy()
+    if "boxes" in target:
+        boxes = target["boxes"]
+        scaled_boxes = boxes * torch.as_tensor([ratio_width, ratio_height, ratio_width, ratio_height])
+        target["boxes"] = scaled_boxes
 
-class SubtractMeans(object):
-    def __init__(self, mean):
-        self.mean = np.array(mean, dtype=np.float32)
+    if "area" in target:
+        area = target["area"]
+        scaled_area = area * (ratio_width * ratio_height)
+        target["area"] = scaled_area
 
-    def __call__(self, image, boxes=None, labels=None):
-        image = image.astype(np.float32)
-        image -= self.mean
-        return image.astype(np.float32), boxes, labels
+    h, w = size
+    target["size"] = torch.tensor([h, w])
 
+    if "masks" in target:
+        target['masks'] = interpolate(
+            target['masks'][:, None].float(), size, mode="nearest")[:, 0] > 0.5
 
-class ToAbsoluteCoords(object):
-    def __call__(self, image, boxes=None, labels=None):
-        height, width, channels = image.shape
-        boxes[:, 0] *= width
-        boxes[:, 2] *= width
-        boxes[:, 1] *= height
-        boxes[:, 3] *= height
-
-        return image, boxes, labels
-
-
-class ToPercentCoords(object):
-    def __call__(self, image, boxes=None, labels=None):
-        height, width, channels = image.shape
-        boxes[:, 0] /= width
-        boxes[:, 2] /= width
-        boxes[:, 1] /= height
-        boxes[:, 3] /= height
-
-        return image, boxes, labels
+    return rescaled_image, target
 
 
-class Resize(object):
-    def __init__(self, size=300):
+def pad(image, target, padding):
+    # assumes that we only pad on the bottom right corners
+    padded_image = F.pad(image, (0, 0, padding[0], padding[1]))
+    if target is None:
+        return padded_image, None
+    target = target.copy()
+    # should we do something wrt the original size?
+    target["size"] = torch.tensor(padded_image.size[::-1])
+    if "masks" in target:
+        target['masks'] = torch.nn.functional.pad(target['masks'], (0, padding[0], 0, padding[1]))
+    return padded_image, target
+
+
+class RandomCrop(object):
+    def __init__(self, size):
         self.size = size
 
-    def __call__(self, image, boxes=None, labels=None):
-        image = cv2.resize(image, (self.size,
-                                 self.size))
-        return image, boxes, labels
+    def __call__(self, img, target):
+        region = T.RandomCrop.get_params(img, self.size)
+        return crop(img, target, region)
 
 
-class RandomSaturation(object):
-    def __init__(self, lower=0.5, upper=1.5):
-        self.lower = lower
-        self.upper = upper
-        assert self.upper >= self.lower, "contrast upper must be >= lower."
-        assert self.lower >= 0, "contrast lower must be non-negative."
+class RandomSizeCrop(object):
+    def __init__(self, min_size: int, max_size: int):
+        self.min_size = min_size
+        self.max_size = max_size
 
-    def __call__(self, image, boxes=None, labels=None):
-        if random.randint(2):
-            image[:, :, 1] *= random.uniform(self.lower, self.upper)
-
-        return image, boxes, labels
+    def __call__(self, img: PIL.Image.Image, target: dict):
+        w = random.randint(self.min_size, min(img.width, self.max_size))
+        h = random.randint(self.min_size, min(img.height, self.max_size))
+        region = T.RandomCrop.get_params(img, [h, w])
+        return crop(img, target, region)
 
 
-class RandomHue(object):
-    def __init__(self, delta=18.0):
-        assert delta >= 0.0 and delta <= 360.0
-        self.delta = delta
+class CenterCrop(object):
+    def __init__(self, size):
+        self.size = size
 
-    def __call__(self, image, boxes=None, labels=None):
-        if random.randint(2):
-            image[:, :, 0] += random.uniform(-self.delta, self.delta)
-            image[:, :, 0][image[:, :, 0] > 360.0] -= 360.0
-            image[:, :, 0][image[:, :, 0] < 0.0] += 360.0
-        return image, boxes, labels
-
-
-class RandomLightingNoise(object):
-    def __init__(self):
-        self.perms = ((0, 1, 2), (0, 2, 1),
-                      (1, 0, 2), (1, 2, 0),
-                      (2, 0, 1), (2, 1, 0))
-
-    def __call__(self, image, boxes=None, labels=None):
-        if random.randint(2):
-            swap = self.perms[random.randint(len(self.perms))]
-            shuffle = SwapChannels(swap)  # shuffle channels
-            image = shuffle(image)
-        return image, boxes, labels
+    def __call__(self, img, target):
+        image_width, image_height = img.size
+        crop_height, crop_width = self.size
+        crop_top = int(round((image_height - crop_height) / 2.))
+        crop_left = int(round((image_width - crop_width) / 2.))
+        return crop(img, target, (crop_top, crop_left, crop_height, crop_width))
 
 
-class ConvertColor(object):
-    def __init__(self, current='BGR', transform='HSV'):
-        self.transform = transform
-        self.current = current
+class RandomHorizontalFlip(object):
+    def __init__(self, p=0.5):
+        self.p = p
 
-    def __call__(self, image, boxes=None, labels=None):
-        if self.current == 'BGR' and self.transform == 'HSV':
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        elif self.current == 'HSV' and self.transform == 'BGR':
-            image = cv2.cvtColor(image, cv2.COLOR_HSV2BGR)
-        else:
-            raise NotImplementedError
-        return image, boxes, labels
+    def __call__(self, img, target):
+        if random.random() < self.p:
+            return hflip(img, target)
+        return img, target
 
 
-class RandomContrast(object):
-    def __init__(self, lower=0.5, upper=1.5):
-        self.lower = lower
-        self.upper = upper
-        assert self.upper >= self.lower, "contrast upper must be >= lower."
-        assert self.lower >= 0, "contrast lower must be non-negative."
+class RandomResize(object):
+    def __init__(self, sizes, max_size=None):
+        assert isinstance(sizes, (list, tuple))
+        self.sizes = sizes
+        self.max_size = max_size
 
-    # expects float image
-    def __call__(self, image, boxes=None, labels=None):
-        if random.randint(2):
-            alpha = random.uniform(self.lower, self.upper)
-            image *= alpha
-        return image, boxes, labels
+    def __call__(self, img, target=None):
+        size = random.choice(self.sizes)
+        return resize(img, target, size, self.max_size)
 
 
-class RandomBrightness(object):
-    def __init__(self, delta=32):
-        assert delta >= 0.0
-        assert delta <= 255.0
-        self.delta = delta
+class RandomPad(object):
+    def __init__(self, max_pad):
+        self.max_pad = max_pad
 
-    def __call__(self, image, boxes=None, labels=None):
-        if random.randint(2):
-            delta = random.uniform(-self.delta, self.delta)
-            image += delta
-        return image, boxes, labels
+    def __call__(self, img, target):
+        pad_x = random.randint(0, self.max_pad)
+        pad_y = random.randint(0, self.max_pad)
+        return pad(img, target, (pad_x, pad_y))
 
 
-class ToCV2Image(object):
-    def __call__(self, tensor, boxes=None, labels=None):
-        return tensor.cpu().numpy().astype(np.float32).transpose((1, 2, 0)), boxes, labels
+class RandomSelect(object):
+    """
+    Randomly selects between transforms1 and transforms2,
+    with probability p for transforms1 and (1 - p) for transforms2
+    """
+    def __init__(self, transforms1, transforms2, p=0.5):
+        self.transforms1 = transforms1
+        self.transforms2 = transforms2
+        self.p = p
+
+    def __call__(self, img, target):
+        if random.random() < self.p:
+            return self.transforms1(img, target)
+        return self.transforms2(img, target)
 
 
 class ToTensor(object):
-    def __call__(self, cvimage, boxes=None, labels=None):
-        return torch.from_numpy(cvimage.astype(np.float32)).permute(2, 0, 1), boxes, labels
+    def __call__(self, img, target):
+        return F.to_tensor(img), target
 
 
-class RandomSampleCrop(object):
-    """Crop
-    Arguments:
-        img (Image): the image being input during training
-        boxes (Tensor): the original bounding boxes in pt form
-        labels (Tensor): the class labels for each bbox
-        mode (float tuple): the min and max jaccard overlaps
-    Return:
-        (img, boxes, classes)
-            img (Image): the cropped image
-            boxes (Tensor): the adjusted bounding boxes in pt form
-            labels (Tensor): the class labels for each bbox
-    """
-    def __init__(self):
-        self.sample_options = (
-            # using entire original input image
-            None,
-            # sample a patch s.t. MIN jaccard w/ obj in .1,.3,.4,.7,.9
-            (0.1, None),
-            (0.3, None),
-            (0.7, None),
-            (0.9, None),
-            # randomly sample a patch
-            (None, None),
-        )
+class RandomErasing(object):
 
-    def __call__(self, image, boxes=None, labels=None):
-        height, width, _ = image.shape
-        while True:
-            # randomly choose a mode
-            mode = random.choice(self.sample_options)
-            if mode is None:
-                return image, boxes, labels
+    def __init__(self, *args, **kwargs):
+        self.eraser = T.RandomErasing(*args, **kwargs)
 
-            min_iou, max_iou = mode
-            if min_iou is None:
-                min_iou = float('-inf')
-            if max_iou is None:
-                max_iou = float('inf')
-
-            # max trails (50)
-            for _ in range(50):
-                current_image = image
-
-                w = random.uniform(0.3 * width, width)
-                h = random.uniform(0.3 * height, height)
-
-                # aspect ratio constraint b/t .5 & 2
-                if h / w < 0.5 or h / w > 2:
-                    continue
-
-                left = random.uniform(width - w)
-                top = random.uniform(height - h)
-
-                # convert to integer rect x1,y1,x2,y2
-                rect = np.array([int(left), int(top), int(left+w), int(top+h)])
-
-                # calculate IoU (jaccard overlap) b/t the cropped and gt boxes
-                overlap = jaccard_numpy(boxes, rect)
-
-                # is min and max overlap constraint satisfied? if not try again
-                if overlap.min() < min_iou and max_iou < overlap.max():
-                    continue
-
-                # cut the crop from the image
-                current_image = current_image[rect[1]:rect[3], rect[0]:rect[2],
-                                              :]
-
-                # keep overlap with gt box IF center in sampled patch
-                centers = (boxes[:, :2] + boxes[:, 2:]) / 2.0
-
-                # mask in all gt boxes that above and to the left of centers
-                m1 = (rect[0] < centers[:, 0]) * (rect[1] < centers[:, 1])
-
-                # mask in all gt boxes that under and to the right of centers
-                m2 = (rect[2] > centers[:, 0]) * (rect[3] > centers[:, 1])
-
-                # mask in that both m1 and m2 are true
-                mask = m1 * m2
-
-                # have any valid boxes? try again if not
-                if not mask.any():
-                    continue
-
-                # take only matching gt boxes
-                current_boxes = boxes[mask, :].copy()
-
-                # take only matching gt labels
-                current_labels = labels[mask]
-
-                # should we use the box left and top corner or the crop's
-                current_boxes[:, :2] = np.maximum(current_boxes[:, :2],
-                                                  rect[:2])
-                # adjust to crop (by substracting crop's left,top)
-                current_boxes[:, :2] -= rect[:2]
-
-                current_boxes[:, 2:] = np.minimum(current_boxes[:, 2:],
-                                                  rect[2:])
-                # adjust to crop (by substracting crop's left,top)
-                current_boxes[:, 2:] -= rect[:2]
-
-                return current_image, current_boxes, current_labels
+    def __call__(self, img, target):
+        return self.eraser(img), target
 
 
-class Expand(object):
-    def __init__(self, mean):
+class Normalize(object):
+    def __init__(self, mean, std):
         self.mean = mean
+        self.std = std
 
-    def __call__(self, image, boxes, labels):
-        if random.randint(2):
-            return image, boxes, labels
-
-        height, width, depth = image.shape
-        ratio = random.uniform(1, 4)
-        left = random.uniform(0, width*ratio - width)
-        top = random.uniform(0, height*ratio - height)
-
-        expand_image = np.zeros(
-            (int(height*ratio), int(width*ratio), depth),
-            dtype=image.dtype)
-        expand_image[:, :, :] = self.mean
-        expand_image[int(top):int(top + height),
-                     int(left):int(left + width)] = image
-        image = expand_image
-
-        boxes = boxes.copy()
-        boxes[:, :2] += (int(left), int(top))
-        boxes[:, 2:] += (int(left), int(top))
-
-        return image, boxes, labels
+    def __call__(self, image, target=None):
+        image = F.normalize(image, mean=self.mean, std=self.std)
+        if target is None:
+            return image, None
+        target = target.copy()
+        h, w = image.shape[-2:]
+        if "boxes" in target:
+            boxes = target["boxes"]
+            boxes = box_xyxy_to_cxcywh(boxes)
+            boxes = boxes / torch.tensor([w, h, w, h], dtype=torch.float32)
+            target["boxes"] = boxes
+        return image, target
 
 
-class RandomMirror(object):
-    def __call__(self, image, boxes, classes):
-        _, width, _ = image.shape
-        if random.randint(2):
-            image = image[:, ::-1]
-            boxes = boxes.copy()
-            boxes[:, 0::2] = width - boxes[:, 2::-2]
-        return image, boxes, classes
+class Compose(object):
+    def __init__(self, transforms):
+        self.transforms = transforms
 
+    def __call__(self, image, target):
+        for t in self.transforms:
+            image, target = t(image, target)
+        return image, target
 
-class SwapChannels(object):
-    """Transforms a tensorized image by swapping the channels in the order
-     specified in the swap tuple.
-    Args:
-        swaps (int triple): final order of channels
-            eg: (2, 1, 0)
-    """
-
-    def __init__(self, swaps):
-        self.swaps = swaps
-
-    def __call__(self, image):
-        """
-        Args:
-            image (Tensor): image tensor to be transformed
-        Return:
-            a tensor with channels swapped according to swap
-        """
-        # if torch.is_tensor(image):
-        #     image = image.data.cpu().numpy()
-        # else:
-        #     image = np.array(image)
-        image = image[:, :, self.swaps]
-        return image
-
-
-class PhotometricDistort(object):
-    def __init__(self):
-        self.pd = [
-            RandomContrast(),
-            ConvertColor(transform='HSV'),
-            RandomSaturation(),
-            RandomHue(),
-            ConvertColor(current='HSV', transform='BGR'),
-            RandomContrast()
-        ]
-        self.rand_brightness = RandomBrightness()
-        self.rand_light_noise = RandomLightingNoise()
-
-    def __call__(self, image, boxes, labels):
-        im = image.copy()
-        im, boxes, labels = self.rand_brightness(im, boxes, labels)
-        if random.randint(2):
-            distort = Compose(self.pd[:-1])
-        else:
-            distort = Compose(self.pd[1:])
-        im, boxes, labels = distort(im, boxes, labels)
-        return self.rand_light_noise(im, boxes, labels)
-
-
-class SSDAugmentation(object):
-    def __init__(self, size=300, mean=(104, 117, 123)):
-        self.mean = mean
-        self.size = size
-        self.augment = Compose([
-            ConvertFromInts(),
-            ToAbsoluteCoords(),
-            PhotometricDistort(),
-            Expand(self.mean),
-            RandomSampleCrop(),
-            RandomMirror(),
-            ToPercentCoords(),
-            Resize(self.size),
-            SubtractMeans(self.mean)
-        ])
-
-    def __call__(self, img, boxes, labels):
-        return self.augment(img, boxes, labels)
+    def __repr__(self):
+        format_string = self.__class__.__name__ + "("
+        for t in self.transforms:
+            format_string += "\n"
+            format_string += "    {0}".format(t)
+        format_string += "\n)"
+        return format_string
