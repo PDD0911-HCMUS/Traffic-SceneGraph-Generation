@@ -210,9 +210,10 @@ def masks_to_boxes(masks):
     y_min = y_mask.masked_fill(~(masks.bool()), 1e8).flatten(1).min(-1)[0]
 
     return torch.stack([x_min, y_min, x_max, y_max], 1)
+
 if __name__ == '__main__':
-    x = torch.randn(1,3,3)
-    y = torch.randn(1,2,2)
+    x = torch.randn(3,200,300)
+    y = torch.randn(3,200,200)
 
     lsTensor = [x,y]
     nested_tensor_from_tensor_list(lsTensor)

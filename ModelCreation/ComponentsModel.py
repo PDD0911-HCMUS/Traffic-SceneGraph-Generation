@@ -6,6 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import math
+from PositionalEncoding import build_position_encoding
 
 
 class CNNBackbone(nn.Module):
@@ -236,36 +237,47 @@ def giou_loss(pred_boxes, target_boxes):
 
 
 if __name__ == '__main__':
-    x = torch.randn(2, 3, 224, 224)
+    x1 = torch.randn(3, 224, 224)
+    x2 = torch.randn(2,3, 224, 224)
+
+    outCNNtest = torch.randn(1, 2560)
+
+    lsTensor = [outCNNtest]
 
     # Try CNN Backbone
     cnnBackbone = CNNBackbone()
-    outCNN = cnnBackbone(x)
+    outCNN = cnnBackbone(x2)
     print("output CNN: ", outCNN.size())
 
-    #Try EstimateCoupleAttentionLayer
-    feature_dim = outCNN.size(1)
-    hidden_dim = 512
+    pe = build_position_encoding()
+    out = pe(lsTensor)
+    print(out.size())
 
-    attCplayer = EstimateCoupleAttentionLayer(feature_dim, hidden_dim)
-    outputCpAtt, attention_weights = attCplayer(outCNN)
-    print("output Couple Attention: ", outputCpAtt.size())
-    #print(outputCpAtt)
 
-    #Try EsitmateAttributeAttentionLayer
-    feature_dim = outCNN.size(1)
-    hidden_dim = 512
 
-    attAttlayer = EsitmateAttributeAttentionLayer(feature_dim, hidden_dim)
-    outputAttAtt, attention_weights = attAttlayer(outCNN)
-    print("output Attribute Attention: ", outputAttAtt.size())
-    #print(outputAttAtt)
+    # #Try EstimateCoupleAttentionLayer
+    # feature_dim = outCNN.size(1)
+    # hidden_dim = 512
 
-    #Try FFN BBox for couple
-    outConcat = torch.cat((outputCpAtt, outputAttAtt),-1)
-    print("outConcat: ",outConcat.size())
-    ffnCp = FFNCoupleRegr()
-    bboxCp = ffnCp(outConcat)
-    print(bboxCp.size())
-    print(attention_weights[0])
+    # attCplayer = EstimateCoupleAttentionLayer(feature_dim, hidden_dim)
+    # outputCpAtt, attention_weights = attCplayer(outCNN)
+    # print("output Couple Attention: ", outputCpAtt.size())
+    # #print(outputCpAtt)
+
+    # #Try EsitmateAttributeAttentionLayer
+    # feature_dim = outCNN.size(1)
+    # hidden_dim = 512
+
+    # attAttlayer = EsitmateAttributeAttentionLayer(feature_dim, hidden_dim)
+    # outputAttAtt, attention_weights = attAttlayer(outCNN)
+    # print("output Attribute Attention: ", outputAttAtt.size())
+    # #print(outputAttAtt)
+
+    # #Try FFN BBox for couple
+    # outConcat = torch.cat((outputCpAtt, outputAttAtt),-1)
+    # print("outConcat: ",outConcat.size())
+    # ffnCp = FFNCoupleRegr()
+    # bboxCp = ffnCp(outConcat)
+    # print(bboxCp.size())
+    # print(attention_weights[0])
 

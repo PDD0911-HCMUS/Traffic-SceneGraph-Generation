@@ -2,11 +2,15 @@
 """
 Various positional encodings for the transformer.
 """
+import os
+import sys
+get_pwd = os.getcwd()
+sys.path.insert(0, get_pwd)
 import math
 import torch
 from torch import nn
-
 from Datasets.Util import NestedTensor
+
 
 
 class PositionEmbeddingSine(nn.Module):
@@ -76,14 +80,23 @@ class PositionEmbeddingLearned(nn.Module):
         return pos
 
 
-def build_position_encoding(args):
-    N_steps = args.hidden_dim // 2
-    if args.position_embedding in ('v2', 'sine'):
-        # TODO find a better way of exposing other arguments
-        position_embedding = PositionEmbeddingSine(N_steps, normalize=True)
-    elif args.position_embedding in ('v3', 'learned'):
-        position_embedding = PositionEmbeddingLearned(N_steps)
-    else:
-        raise ValueError(f"not supported {args.position_embedding}")
+# def build_position_encoding(args):
+#     N_steps = args.hidden_dim // 2
+#     if args.position_embedding in ('v2', 'sine'):
+#         # TODO find a better way of exposing other arguments
+#         position_embedding = PositionEmbeddingSine(N_steps, normalize=True)
+#     elif args.position_embedding in ('v3', 'learned'):
+#         position_embedding = PositionEmbeddingLearned(N_steps)
+#     else:
+#         raise ValueError(f"not supported {args.position_embedding}")
+
+#     return position_embedding
+    
+def build_position_encoding():
+    N_steps = 256 // 2
+    position_embedding = PositionEmbeddingSine(N_steps, normalize=True)
 
     return position_embedding
+
+
+
