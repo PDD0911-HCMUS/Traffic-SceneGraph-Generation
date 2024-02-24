@@ -7,22 +7,7 @@ from torch.utils.data import Dataset, DataLoader
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-
-CLASSES = [ 'N/A', 'airplane', 'animal', 'arm', 'bag', 'banana', 'basket', 'beach', 'bear', 'bed', 'bench', 'bike',
-                'bird', 'board', 'boat', 'book', 'boot', 'bottle', 'bowl', 'box', 'boy', 'branch', 'building',
-                'bus', 'cabinet', 'cap', 'car', 'cat', 'chair', 'child', 'clock', 'coat', 'counter', 'cow', 'cup',
-                'curtain', 'desk', 'dog', 'door', 'drawer', 'ear', 'elephant', 'engine', 'eye', 'face', 'fence',
-                'finger', 'flag', 'flower', 'food', 'fork', 'fruit', 'giraffe', 'girl', 'glass', 'glove', 'guy',
-                'hair', 'hand', 'handle', 'hat', 'head', 'helmet', 'hill', 'horse', 'house', 'jacket', 'jean',
-                'kid', 'kite', 'lady', 'lamp', 'laptop', 'leaf', 'leg', 'letter', 'light', 'logo', 'man', 'men',
-                'motorcycle', 'mountain', 'mouth', 'neck', 'nose', 'number', 'orange', 'pant', 'paper', 'paw',
-                'people', 'person', 'phone', 'pillow', 'pizza', 'plane', 'plant', 'plate', 'player', 'pole', 'post',
-                'pot', 'racket', 'railing', 'rock', 'roof', 'room', 'screen', 'seat', 'sheep', 'shelf', 'shirt',
-                'shoe', 'short', 'sidewalk', 'sign', 'sink', 'skateboard', 'ski', 'skier', 'sneaker', 'snow',
-                'sock', 'stand', 'street', 'surfboard', 'table', 'tail', 'tie', 'tile', 'tire', 'toilet', 'towel',
-                'tower', 'track', 'train', 'tree', 'truck', 'trunk', 'umbrella', 'vase', 'vegetable', 'vehicle',
-                'wave', 'wheel', 'window', 'windshield', 'wing', 'wire', 'woman', 'zebra']
-print(len(CLASSES))
+import Util as ults
 
 vgRoot = 'Datasets/VisualGenome/'
 
@@ -37,7 +22,7 @@ vgGT = 'ExtractGT'
 resize = (224,224)
 mean = (0.485, 0.456, 0.406)
 std = (0.229, 0.224, 0.225)
-batch = 4
+batch = 2
 
 class MyTransform():
     def __init__(self, resize, mean, std):
@@ -105,10 +90,10 @@ class DatasetLoader(Dataset):
             # labelRel += [[item['id_sub']]+newSubBbox + [item['id_obj']]+newObjBbox + [item['rel']]]
 
         target = {
-            'annotation': label,
-            'labelCouple': labelCouple,
-            'labelCoupleAttr': labelCoupleAttr,
-            'labelRel': labelRel
+            'annotation': torch.tensor(label),
+            'labelCouple': torch.tensor(labelCouple),
+            'labelCoupleAttr': torch.tensor(labelCoupleAttr),
+            'labelRel': torch.tensor(labelRel)
         }
 
         return imageTransform, target
@@ -178,41 +163,44 @@ def my_collate_fn(batch):
 
     return imgs, targets
 
-trainList = GetAllImage(vgRoot+vgImg)
+def CheckSample(idx, dataset):
+    print(dataset.__len__())
+    imageTransform, target = dataset.__getitem__(idx)
+    print(target)
+    imshow(imageTransform)
+    plt.show()
 
-trainDataset = DatasetLoader(trainList, transform=MyTransform(resize, mean, std), mode='train')
-# trainDataLoader = DataLoader(trainDataset, batch_size=batch, shuffle=True)
-
-# dataloaderDict = {
-#     "train": trainDataLoader,
-#     "val": None
-# }
-
-# batchIter = iter(dataloaderDict['train'])
-# inputs, objetcContext, attrContext, label = next(batchIter)
-# print(len(objetcContext))
-# print(len(attrContext))
-# print(len(label))
+def BuildDataset(imPath, mode):
+    trainList = GetAllImage(imPath)
+    dataset = None
+    if(mode == 'train'):
+        dataset = DatasetLoader(trainList, transform=MyTransform(resize, mean, std), mode=mode)
+    elif(mode == 'val'):
+        dataset = DatasetLoader(trainList, transform=MyTransform(resize, mean, std), mode=mode)
+    return dataset
 
 
-print(trainDataset.__len__())
-index = 100
-imageTransform, target = trainDataset.__getitem__(index)
-print(target)
-# imageTransform, objetcContext, attrContext, label = trainDataset.__getitem__(index)
-# print(imageTransform.shape)
-# # print('ID Subjects: ', sub[:2])
-# # print('BBox Subjects: ', subBbox[:2])
-# # print('Attribute Subjects: ', attributeSub[:2])
-# # print('Relation: ', rel[:2])
-# print(len(objetcContext))
-# print(len(attrContext))
-# print(len(label))
+if __name__=='__main__':
+    trainList = GetAllImage(vgRoot+vgImg)
 
-# print("Label: ", label[0])
-# print("ObjectContext: ", objetcContext[0])
-# print("AttrContext: ", attrContext[0])
+    trainDataset = DatasetLoader(trainList, transform=MyTransform(resize, mean, std), mode='train')
+    trainDataLoader = DataLoader(trainDataset, batch_size=batch, collate_fn=ults.collate_fn , shuffle=True)
 
-imshow(imageTransform)
+    dataloaderDict = {
+        "train": trainDataLoader,
+        "val": None
+    }
 
-plt.show()
+    # batchIter = iter(dataloaderDict['train'])
+    # inputs, target = next(batchIter)
+    # print(len(target['annotation']))
+
+
+    print(trainDataset.__len__())
+    index = 10
+    imageTransform, target = trainDataset.__getitem__(index)
+    print(target)
+
+    imshow(imageTransform)
+
+    plt.show()
