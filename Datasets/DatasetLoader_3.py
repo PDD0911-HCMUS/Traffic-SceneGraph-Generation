@@ -71,7 +71,7 @@ class DatasetLoader(Dataset):
         objetcContext, attrContext, label = [],[],[]
         labelCouple, labelCoupleAttr, labelRel = [],[],[]
 
-        for item in annotation:
+        for item in annotation[:6]:
             newSubBbox = ResizeBbox(item['sub_bbox'],originalSize, resize)
             newObjBbox = ResizeBbox(item['obj_bbox'],originalSize, resize)
 
@@ -191,16 +191,16 @@ if __name__=='__main__':
         "val": None
     }
 
-    # batchIter = iter(dataloaderDict['train'])
-    # inputs, target = next(batchIter)
+    batchIter = iter(dataloaderDict['train'])
+    inputs, target = next(batchIter)
     # print(len(target['annotation']))
 
 
     print(trainDataset.__len__())
     index = 10
     imageTransform, target = trainDataset.__getitem__(index)
-    print(target)
-
-    imshow(imageTransform)
+    #print(target)
+    print(inputs.tensors[0].size())
+    imshow(inputs.tensors[0])
 
     plt.show()

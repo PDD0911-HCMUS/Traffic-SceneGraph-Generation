@@ -211,11 +211,11 @@ def masks_to_boxes(masks):
 
     return torch.stack([x_min, y_min, x_max, y_max], 1)
 
-if __name__ == '__main__':
-    x = torch.randn(3,200,300)
-    y = torch.randn(3,200,200)
+# if __name__ == '__main__':
+#     x = torch.randn(3,200,300)
+#     y = torch.randn(3,200,200)
 
-    lsTensor = [x,y]
-    nested_tensor_from_tensor_list(lsTensor)
+#     lsTensor = [x,y]
+#     nested_tensor_from_tensor_list(lsTensor)
 
 
