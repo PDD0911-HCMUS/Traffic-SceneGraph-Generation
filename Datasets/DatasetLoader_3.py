@@ -16,8 +16,8 @@ vgSG = vgRoot+'Annotation/scene_graphs.json'
 
 vgExAttr = 'ExtractAttribute'
 vgExRel = 'ExtractRelation'
-vgImg = 'ExtractImage'
-vgGT = 'ExtractGT'
+vgImg = 'Image'
+vgGT = 'GTTraffic'
 
 resize = (224,224)
 mean = (0.485, 0.456, 0.406)
@@ -58,42 +58,66 @@ class DatasetLoader(Dataset):
     
     def __getitem__(self, index):
         imagePath = self.imageList[index]
-        # print(imagePath)
-        image = Image.open(imagePath)
-        originalSize = image.size
-        imageTransform = self.transform(image, self.mode)
+        # #print(imagePath)
+        
 
         annotation = os.path.join(imagePath.replace(vgImg, vgGT).replace('.jpg', '.json'))
         annotation = open(annotation)
         annotation = json.load(annotation)
+
+        image = Image.open(imagePath)
+        originalSize = image.size
+        imageTransform = self.transform(image, self.mode)
         
         sub,subBbox,attributeSub, obj,objBbox,attributeObj, rel = [],[],[], [],[],[], [] 
         objetcContext, attrContext, label = [],[],[]
         labelCouple, labelCoupleAttr, labelRel = [],[],[]
 
-        for item in annotation[:6]:
-            newSubBbox = ResizeBbox(item['sub_bbox'],originalSize, resize)
-            newObjBbox = ResizeBbox(item['obj_bbox'],originalSize, resize)
+        for item in annotation[:5]:
+            newSubBbox = ResizeBbox(item['bbox_sub'],originalSize, resize)
+            newObjBbox = ResizeBbox(item['bbox_obj'],originalSize, resize)
 
-            newSubAttr = ResizeAttributeAnno(item['att_sub'])
-            newObjAttr = ResizeAttributeAnno(item['att_obj'])
+            # newSubAttr = ResizeAttributeAnno(item['attr_sub_id'])
+            # newObjAttr = ResizeAttributeAnno(item['attr_obj_id'])
 
+            subBbox.append(newSubBbox)
+            objBbox.append(newObjBbox)
+
+            sub.append(item['id_sub'])
+            obj.append(item['id_obj'])
+
+            attributeSub = item['attr_sub_id']
+            attributeObj = item['attr_obj_id']
+
+            rel.append(item['rel_id'])
+
+            
             #label += [[item['id_sub']]+newSubBbox+newSubAttr + [item['id_obj']]+newObjBbox+newObjAttr + [item['rel']]]
 
-            label.append([item['id_sub']]+newSubBbox+newSubAttr + [item['id_obj']]+newObjBbox+newObjAttr + [item['rel']])
-            labelCouple.append([item['id_sub']]+newSubBbox + [item['id_obj']]+newObjBbox)
-            labelCoupleAttr.append([item['id_sub']]+newSubBbox+newSubAttr + [item['id_obj']]+newObjBbox+newObjAttr)
-            labelRel.append([item['id_sub']]+newSubBbox + [item['id_obj']]+newObjBbox + [item['rel']])
+            # label.append([item['id_sub']]+newSubBbox+newSubAttr + [item['id_obj']]+newObjBbox+newObjAttr + [item['rel_id']])
+            # labelCouple.append([item['id_sub']]+newSubBbox + [item['id_obj']]+newObjBbox)
+            # labelCoupleAttr.append([item['id_sub']]+newSubBbox+newSubAttr + [item['id_obj']]+newObjBbox+newObjAttr)
+            # labelRel.append([item['id_sub']]+newSubBbox + [item['id_obj']]+newObjBbox + [item['rel_id']])
 
             # labelCouple += [[item['id_sub']]+newSubBbox + [item['id_obj']]+newObjBbox]
             # labelCoupleAttr += [[item['id_sub']]+newSubBbox+newSubAttr + [item['id_obj']]+newObjBbox+newObjAttr]
             # labelRel += [[item['id_sub']]+newSubBbox + [item['id_obj']]+newObjBbox + [item['rel']]]
 
+        # target = {
+        #     'annotation': torch.tensor(label),
+        #     'labelCouple': torch.tensor(labelCouple),
+        #     'labelCoupleAttr': torch.tensor(labelCoupleAttr),
+        #     'labelRel': torch.tensor(labelRel)
+        # }
+
         target = {
-            'annotation': torch.tensor(label),
-            'labelCouple': torch.tensor(labelCouple),
-            'labelCoupleAttr': torch.tensor(labelCoupleAttr),
-            'labelRel': torch.tensor(labelRel)
+            'subBbox': torch.tensor(subBbox),
+            'objBbox': torch.tensor(objBbox),
+            'sub': torch.tensor(sub),
+            'obj': torch.tensor(obj),
+            'attributeSub': torch.tensor(attributeSub),
+            'attributeObj': torch.tensor(attributeObj),
+            'rel': torch.tensor(rel)
         }
 
         return imageTransform, target
@@ -138,10 +162,10 @@ def ResizeAttributeAnno(attr: list):
     else:
         return attr[:2]
 
-def CheckLenghtLabel(label):
-    for item in label:
-        # print(len(item))
-        print(item)
+# def CheckLenghtLabel(label):
+#     for item in label:
+#         # #print(len(item))
+#         #print(item)
 
 def GetAllImage(imageDir):
     imageList = []
@@ -164,9 +188,9 @@ def my_collate_fn(batch):
     return imgs, targets
 
 def CheckSample(idx, dataset):
-    print(dataset.__len__())
+    #print(dataset.__len__())
     imageTransform, target = dataset.__getitem__(idx)
-    print(target)
+    #print(target)
     imshow(imageTransform)
     plt.show()
 
@@ -191,16 +215,17 @@ if __name__=='__main__':
         "val": None
     }
 
-    batchIter = iter(dataloaderDict['train'])
-    inputs, target = next(batchIter)
-    # print(len(target['annotation']))
+    # batchIter = iter(dataloaderDict['train'])
+    # inputs, target = next(batchIter)
+    # #print(len(target['annotation']))
 
 
-    print(trainDataset.__len__())
+    #print(trainDataset.__len__())
     index = 10
     imageTransform, target = trainDataset.__getitem__(index)
-    #print(target)
-    print(inputs.tensors[0].size())
-    imshow(inputs.tensors[0])
+    print(target)
+    #print(inputs.tensors[0].size())
+    #imshow(inputs.tensors[0])
+    imshow(imageTransform)
 
     plt.show()

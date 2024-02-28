@@ -110,7 +110,7 @@ def nested_tensor_from_tensor_list(tensor_list: List[Tensor]):
 
         # TODO make it support different-sized images
         max_size = _max_by_axis([list(img.shape) for img in tensor_list])
-        print(max_size)
+        #print(max_size)
         # min_size = tuple(min(s) for s in zip(*[img.shape for img in tensor_list]))
         batch_shape = [len(tensor_list)] + max_size
         b, c, h, w = batch_shape
@@ -123,10 +123,10 @@ def nested_tensor_from_tensor_list(tensor_list: List[Tensor]):
             m[: img.shape[1], :img.shape[2]] = False
     else:
         raise ValueError('not supported')
-    print(tensor.size())
-    for item in tensor:
-        print(item.size())
-        print(item)
+    # print(tensor.size())
+    # for item in tensor:
+    #     print(item.size())
+    #     print(item)
     return NestedTensor(tensor, mask)
 
 '''Box Ops Area'''
