@@ -17,7 +17,7 @@ vgGT = 'ExtractGT'
 resize = (224,224)
 mean = (0.485, 0.456, 0.406)
 std = (0.229, 0.224, 0.225)
-batch = 8
+batch = 2
 
 trainList = GetAllImage(vgRoot+vgImg)
 
@@ -29,65 +29,3 @@ dataloaderDict = {
     "val": None
 }
 
-# batchIter = iter(dataloaderDict['train'])
-# # inputs, objetcContext, attrContext, label = next(batchIter)
-# inputs, label = next(batchIter)
-# print(inputs.size()) 
-# print(len(label))
-# print(label[0].size()) # sub, sub_box, sub_att, obj, obj_box, obj_att, rel
-# print(label[0])
-
-
-d_model = 2560//40 #old = 512
-d = 128
-d_k = d_v = 64
-h = 1
-
-x = torch.randn(8, 3, 224, 224)
-
-#attentionLayer = AttentionLayer(d_model, d_k, d_v, h)
-attentionLayerEOA = AttentionLayer(d_model, d_k, d_v, h)
-attentionLayerEAA = AttentionLayer(d_model, d_k, d_v, h)
-attentionLayerERA = AttentionLayer(d, d_k, d_v, h)
-cnnBackbone = CNNBackbone()
-cnnOutput = OutputCNN()
-model = MyModel(cnnBackbone,attentionLayerEOA,attentionLayerEAA,attentionLayerERA, cnnOutput)
-# output= model(x)
-# print("Output shape:", output.shape)
-# print(output[0])
-# gt_bbox = torch.tensor([[1, 2, 3, 4]], dtype=torch.float32)
-# pr_bbox = torch.tensor([[2, 3, 4, 5]], dtype=torch.float32)
-# loss = ComputeGIoU(gt_bbox, pr_bbox, reduction='none')
-# print(loss)
-
-# writer = SummaryWriter()
-
-# # Tạo dummy input phù hợp với input layer của mô hình
-# dummy_input = torch.randn(1, 3, 224, 224)
-
-# # Thêm mô hình vào TensorBoard
-# writer.add_graph(model, dummy_input)
-# writer.close()
-
-numEpochs = 1
-optimizer = optim.Adam(model.parameters(), lr=0.0001)  # Chọn optimizer
-
-for epoch in range(numEpochs):
-    model.train()
-    for input,target in trainDataLoader:
-        optimizer.zero_grad()
-
-        output = model(input)
-        print('output:', output)
-        
-        #print('size output: ', output.size())
-        # print('subject pred: ', output[0])
-        # print('subject bbox: ', output[1:4])
-        # print('subject attributes: ', output[5:9])
-        # print('object pred: ', output[11:14])
-        # print('object bbox: ', output[0])
-        # print('object attributes: ', output[0])
-
-        print('target: ',target)
-        #print('size target: ', target.shape)
-        break

@@ -16,7 +16,7 @@ vgSG = vgRoot+'Annotation/scene_graphs.json'
 
 vgExAttr = 'ExtractAttribute'
 vgExRel = 'ExtractRelation'
-vgImg = 'Image'
+vgImg = 'ImageTraffic'
 vgGT = 'GTTraffic'
 
 resize = (224,224)
@@ -58,7 +58,7 @@ class DatasetLoader(Dataset):
     
     def __getitem__(self, index):
         imagePath = self.imageList[index]
-        # #print(imagePath)
+        #print(imagePath)
         
 
         annotation = os.path.join(imagePath.replace(vgImg, vgGT).replace('.jpg', '.json'))
@@ -73,7 +73,7 @@ class DatasetLoader(Dataset):
         objetcContext, attrContext, label = [],[],[]
         labelCouple, labelCoupleAttr, labelRel = [],[],[]
 
-        for item in annotation[:5]:
+        for item in annotation[:]:
             newSubBbox = ResizeBbox(item['bbox_sub'],originalSize, resize)
             newObjBbox = ResizeBbox(item['bbox_obj'],originalSize, resize)
 
@@ -86,8 +86,11 @@ class DatasetLoader(Dataset):
             sub.append(item['id_sub'])
             obj.append(item['id_obj'])
 
-            attributeSub = item['attr_sub_id']
-            attributeObj = item['attr_obj_id']
+            # attributeSub = item['attr_sub_id']
+            # attributeObj = item['attr_obj_id']
+
+            attributeSub.append(item['attr_sub_id'])
+            attributeObj.append(item['attr_obj_id'])
 
             rel.append(item['rel_id'])
 
@@ -215,17 +218,19 @@ if __name__=='__main__':
         "val": None
     }
 
-    # batchIter = iter(dataloaderDict['train'])
-    # inputs, target = next(batchIter)
-    # #print(len(target['annotation']))
+    batchIter = iter(dataloaderDict['train'])
+    inputs, target = next(batchIter)
+    print(len(target))
+    print(target[0])
+    imshow(inputs.tensors[0])
 
 
     #print(trainDataset.__len__())
-    index = 10
-    imageTransform, target = trainDataset.__getitem__(index)
-    print(target)
+    # index = 10
+    # imageTransform, target = trainDataset.__getitem__(index)
+    # print(target)
     #print(inputs.tensors[0].size())
     #imshow(inputs.tensors[0])
-    imshow(imageTransform)
+    #imshow(imageTransform)
 
     plt.show()

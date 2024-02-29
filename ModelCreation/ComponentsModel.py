@@ -7,7 +7,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import math
 from PositionalEncoding import build_position_encoding
-
+from Datasets.Util import NestedTensor
+from typing import Dict, List
 
 class CNNBackbone(nn.Module):
     def __init__(self):
@@ -35,7 +36,20 @@ class PositionalEncoding(nn.Module):
         
     def forward(self, x):
         return x + self.pe[:, :x.size(1)]
+class Joiner(nn.Sequential):
+    def __init__(self, backbone, position_embedding):
+        super().__init__(backbone, position_embedding)
 
+    def forward(self, tensor_list: NestedTensor):
+        xs = self[0](tensor_list)
+        out: List[NestedTensor] = []
+        pos = []
+        for name, x in xs.items():
+            out.append(x)
+            # position encoding
+            pos.append(self[1](x).to(x.tensors.dtype))
+
+        return out, pos
 class EsitmateAttributeAttentionLayer(torch.nn.Module):
     def __init__(self, feature_dim, hidden_dim):
         super(EsitmateAttributeAttentionLayer, self).__init__()
@@ -234,24 +248,32 @@ def giou_loss(pred_boxes, target_boxes):
     # Sử dụng pred_boxes_converted và target_boxes_converted với hàm giou_loss đã định nghĩa trước đó
     return original_giou_loss(pred_boxes_converted, target_boxes_converted)
 
-
+def build_backbone():
+    position_embedding = build_position_encoding()
+    backbone = CNNBackbone()
+    model = Joiner(backbone, position_embedding)
+    #model.num_channels = backbone.num_channels
+    return model
 
 if __name__ == '__main__':
     x1 = torch.randn(3, 224, 224)
-    x2 = torch.randn(2,3, 224, 224)
+    x2 = torch.randn(3, 224, 224)
 
-    outCNNtest = torch.randn(1, 2560)
+    # outCNNtest = torch.randn(1, 2560)
 
-    lsTensor = [outCNNtest]
+    # lsTensor = [outCNNtest]
 
-    # Try CNN Backbone
-    cnnBackbone = CNNBackbone()
-    outCNN = cnnBackbone(x2)
-    print("output CNN: ", outCNN.size())
+    # # Try CNN Backbone
+    # cnnBackbone = CNNBackbone()
+    # outCNN = cnnBackbone(x2)
+    # print("output CNN: ", outCNN.size())
 
-    pe = build_position_encoding()
-    out = pe(lsTensor)
-    print(out.size())
+    # pe = build_position_encoding()
+    # out = pe(lsTensor)
+    # print(out.size())
+
+    model = build_backbone()
+    features, pos = model()
 
 
 
