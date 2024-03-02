@@ -11,13 +11,11 @@ import Util as ults
 
 vgRoot = 'Datasets/VisualGenome/'
 
-vgAttr = vgRoot+'Annotation/attributes.json'
-vgSG = vgRoot+'Annotation/scene_graphs.json'
+vgImageTrain = 'Train/image'
+vgAnnoTrain = 'Train/anno'
 
-vgExAttr = 'ExtractAttribute'
-vgExRel = 'ExtractRelation'
-vgImg = 'Image'
-vgGT = 'GTTraffic'
+vgImageVal = 'Val/image'
+vgAnnoVal = 'Val/anno'
 
 resize = (224,224)
 mean = (0.485, 0.456, 0.406)
@@ -48,8 +46,9 @@ class MyTransform():
 
 
 class DatasetLoader(Dataset):
-    def __init__(self, imageList, transform = None, mode = 'train'):
+    def __init__(self, imageList, annoList, transform = None, mode = 'train'):
         self.imageList = imageList
+        self.annoList = annoList
         self.transform = transform
         self.mode = mode
     
@@ -70,15 +69,10 @@ class DatasetLoader(Dataset):
         imageTransform = self.transform(image, self.mode)
         
         sub,subBbox,attributeSub, obj,objBbox,attributeObj, rel = [],[],[], [],[],[], [] 
-        objetcContext, attrContext, label = [],[],[]
-        labelCouple, labelCoupleAttr, labelRel = [],[],[]
 
         for item in annotation[:]:
             newSubBbox = ResizeBbox(item['bbox_sub'],originalSize, resize)
             newObjBbox = ResizeBbox(item['bbox_obj'],originalSize, resize)
-
-            # newSubAttr = ResizeAttributeAnno(item['attr_sub_id'])
-            # newObjAttr = ResizeAttributeAnno(item['attr_obj_id'])
 
             subBbox.append(newSubBbox)
             objBbox.append(newObjBbox)
@@ -86,32 +80,10 @@ class DatasetLoader(Dataset):
             sub.append(item['id_sub'])
             obj.append(item['id_obj'])
 
-            # attributeSub = item['attr_sub_id']
-            # attributeObj = item['attr_obj_id']
-
             attributeSub.append(item['attr_sub_id'])
             attributeObj.append(item['attr_obj_id'])
 
             rel.append(item['rel_id'])
-
-            
-            #label += [[item['id_sub']]+newSubBbox+newSubAttr + [item['id_obj']]+newObjBbox+newObjAttr + [item['rel']]]
-
-            # label.append([item['id_sub']]+newSubBbox+newSubAttr + [item['id_obj']]+newObjBbox+newObjAttr + [item['rel_id']])
-            # labelCouple.append([item['id_sub']]+newSubBbox + [item['id_obj']]+newObjBbox)
-            # labelCoupleAttr.append([item['id_sub']]+newSubBbox+newSubAttr + [item['id_obj']]+newObjBbox+newObjAttr)
-            # labelRel.append([item['id_sub']]+newSubBbox + [item['id_obj']]+newObjBbox + [item['rel_id']])
-
-            # labelCouple += [[item['id_sub']]+newSubBbox + [item['id_obj']]+newObjBbox]
-            # labelCoupleAttr += [[item['id_sub']]+newSubBbox+newSubAttr + [item['id_obj']]+newObjBbox+newObjAttr]
-            # labelRel += [[item['id_sub']]+newSubBbox + [item['id_obj']]+newObjBbox + [item['rel']]]
-
-        # target = {
-        #     'annotation': torch.tensor(label),
-        #     'labelCouple': torch.tensor(labelCouple),
-        #     'labelCoupleAttr': torch.tensor(labelCoupleAttr),
-        #     'labelRel': torch.tensor(labelRel)
-        # }
 
         target = {
             'subBbox': torch.tensor(subBbox),
@@ -154,41 +126,14 @@ def ResizeBbox(bbox, inSize, outSize):
 
     return [new_xmin, new_ymin, new_width, new_height]
 
-def ResizeAttributeAnno(attr: list):
-    """
-    Giá trị mặc định của None là 50852
-    """
-    if(len(attr) < 2):
-        attr.append(50852)
-        ResizeAttributeAnno(attr)
-        return attr
-    else:
-        return attr[:2]
-
-# def CheckLenghtLabel(label):
-#     for item in label:
-#         # #print(len(item))
-#         #print(item)
-
-def GetAllImage(imageDir):
+def GetAllData(imageDir, annoDir):
     imageList = []
+    annoList = []
     for item in os.listdir(imageDir):
         #imageList.append(os.path.join(vgRoot + vgImg, item))
-        imageList.append(vgRoot + vgImg + '/' + item)
-    return imageList[:]
-
-def my_collate_fn(batch):
-    targets = []
-    imgs = []
-
-    for sample in batch:
-        imgs.append(sample[0]) #sample[0]=img
-        targets.append(torch.FloatTensor(sample[1])) # sample[1]=annotation
-    #[3, 300, 300]
-    # (batch_size, 3, 300, 300)
-    imgs = torch.stack(imgs, dim=0)
-
-    return imgs, targets
+        imageList.append(imageDir + '/' + item)
+        annoList.append(annoDir + '/' + item.replace('.jpg', '.json'))
+    return imageList, annoList
 
 def CheckSample(idx, dataset):
     #print(dataset.__len__())
@@ -197,27 +142,46 @@ def CheckSample(idx, dataset):
     imshow(imageTransform)
     plt.show()
 
-def BuildDataset(imPath, mode):
-    trainList = GetAllImage(imPath)
+def BuildDataset(mode):
     dataset = None
     if(mode == 'train'):
-        dataset = DatasetLoader(trainList, transform=MyTransform(resize, mean, std), mode=mode)
+        imgDir = vgRoot + vgImageTrain
+        annDir = vgRoot + vgAnnoTrain
+        dataList = GetAllData(imageDir=imgDir, annoDir=annDir)
+
+        dataset = DatasetLoader(dataList, transform=MyTransform(resize, mean, std), mode=mode)
+        sampler_train = torch.utils.data.RandomSampler(dataset)
+        batch_sampler_train = torch.utils.data.BatchSampler(sampler_train, batch, drop_last=True)
+
+        datasetLoader = DataLoader(dataset, batch_sampler=batch_sampler_train, collate_fn=ults.collate_fn)
+
     elif(mode == 'val'):
-        dataset = DatasetLoader(trainList, transform=MyTransform(resize, mean, std), mode=mode)
-    return dataset
+        imgDir = vgRoot + vgImageVal
+        annDir = vgRoot + vgAnnoVal
+        dataList = GetAllData(imageDir=imgDir, annoDir=annDir)
+        
+        dataset = DatasetLoader(dataList, transform=MyTransform(resize, mean, std), mode=mode)
+        sampler_val = torch.utils.data.SequentialSampler(dataset)
+        datasetLoader = DataLoader(dataset, batch_size=batch, sampler=sampler_val, drop_last=False, collate_fn=ults.collate_fn)
+
+    return datasetLoader
 
 
 if __name__=='__main__':
-    trainList = GetAllImage(vgRoot+vgImg)
+    # trainList = GetAllData(vgRoot+vgImg)
 
-    trainDataset = DatasetLoader(trainList, transform=MyTransform(resize, mean, std), mode='train')
-    trainDataLoader = DataLoader(trainDataset, batch_size=batch, collate_fn=ults.collate_fn , shuffle=True)
+    # trainDataset = DatasetLoader(trainList, transform=MyTransform(resize, mean, std), mode='train')
+    # sampler_train = torch.utils.data.RandomSampler(trainDataset)
+    # batch_sampler_train = torch.utils.data.BatchSampler(
+    #     sampler_train, batch, drop_last=True)
+    # trainDataLoader = DataLoader(trainDataset, batch_sampler=batch_sampler_train, collate_fn=ults.collate_fn)
 
+    
+    trainDataLoader = BuildDataset(mode='train')
     dataloaderDict = {
         "train": trainDataLoader,
         "val": None
     }
-
     batchIter = iter(dataloaderDict['train'])
     inputs, target = next(batchIter)
     print(len(target))

@@ -14,11 +14,13 @@ class CNNBackbone(nn.Module):
     def __init__(self):
         super(CNNBackbone, self).__init__()
         self.cnn = EfficientNet.from_pretrained('efficientnet-b7')
+        self.fc = nn.Linear(2560, 2048) #output dim from EFF-B7 is 2560
 
     def forward(self, x):
         features = self.cnn.extract_features(x)
         global_features = F.adaptive_avg_pool2d(features, 1)
         global_features = global_features.view(global_features.size(0), -1)
+        global_features = self.fc(global_features)
         return global_features
     
 class PositionalEncoding(nn.Module):
