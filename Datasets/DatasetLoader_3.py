@@ -16,7 +16,7 @@ vgSG = vgRoot+'Annotation/scene_graphs.json'
 
 vgExAttr = 'ExtractAttribute'
 vgExRel = 'ExtractRelation'
-vgImg = 'ImageTraffic'
+vgImg = 'Image'
 vgGT = 'GTTraffic'
 
 resize = (224,224)
