@@ -1,86 +1,119 @@
+# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+"""
+Backbone modules.
+"""
+
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
-from efficientnet_pytorch import EfficientNet
-from torch.utils.tensorboard import SummaryWriter
+import torchvision
+from torch import nn
+from torchvision.models._utils import IntermediateLayerGetter
+from typing import Dict, List
 
-class CNNBackbone(nn.Module):
-    def __init__(self):
-        super(CNNBackbone, self).__init__()
-        self.cnn = EfficientNet.from_pretrained('efficientnet-b7')
+from Datasets.Util import NestedTensor, is_main_process
 
-    def forward(self, x):
-        features = self.cnn.extract_features(x)
-        global_features = F.adaptive_avg_pool2d(features, 1)
-        global_features = global_features.view(global_features.size(0), -1)
-        return global_features
+from ModelCreation.PositionalEncoding import build_position_encoding
 
-class EstimateObjectAttention(nn.Module):
-    def __init__(self, feature_size, support_vector_size):
-        super(EstimateObjectAttention, self).__init__()
-        self.support_vector = nn.Parameter(torch.randn(support_vector_size), requires_grad=True)
-        self.attention_layer = nn.Linear(feature_size + support_vector_size, 1)
 
-    def forward(self, image_embedding):
-        batch_size = image_embedding.size(0)
-        support_vector_batch = self.support_vector.expand(batch_size, -1)
-        combined_input = torch.cat((image_embedding, support_vector_batch), dim=1)
-        attention_score = self.attention_layer(combined_input)
-        return attention_score
+class FrozenBatchNorm2d(torch.nn.Module):
+    """
+    BatchNorm2d where the batch statistics and the affine parameters are fixed.
 
-class EstimateAttributeAttention(nn.Module):
-    def __init__(self, feature_size, support_vector_size):
-        super(EstimateAttributeAttention, self).__init__()
-        self.support_vector = nn.Parameter(torch.randn(support_vector_size), requires_grad=True)
-        self.attention_layer = nn.Linear(feature_size + support_vector_size, 1)
+    Copy-paste from torchvision.misc.ops with added eps before rqsrt,
+    without which any other models than torchvision.models.resnet[18,34,50,101]
+    produce nans.
+    """
 
-    def forward(self, image_embedding):
-        batch_size = image_embedding.size(0)
-        support_vector_batch = self.support_vector.expand(batch_size, -1)
-        combined_input = torch.cat((image_embedding, support_vector_batch), dim=1)
-        attention_score = self.attention_layer(combined_input)
-        return attention_score
+    def __init__(self, n):
+        super(FrozenBatchNorm2d, self).__init__()
+        self.register_buffer("weight", torch.ones(n))
+        self.register_buffer("bias", torch.zeros(n))
+        self.register_buffer("running_mean", torch.zeros(n))
+        self.register_buffer("running_var", torch.ones(n))
 
-class EstimateRelationAttention(nn.Module):
-    def __init__(self):
-        super(EstimateRelationAttention, self).__init__()
-        self.relation_layer = nn.Linear(2, 1)  # Assuming each attention score is a scalar
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        num_batches_tracked_key = prefix + 'num_batches_tracked'
+        if num_batches_tracked_key in state_dict:
+            del state_dict[num_batches_tracked_key]
 
-    def forward(self, object_attention, attribute_attention):
-        combined_attention = torch.cat((object_attention, attribute_attention), dim=1)
-        relation_score = self.relation_layer(combined_attention)
-        return relation_score
-
-class MyCompleteModel(nn.Module):
-    def __init__(self):
-        super(MyCompleteModel, self).__init__()
-        self.cnn_backbone = CNNBackbone()
-        feature_size = self.cnn_backbone.cnn._fc.in_features  # Get the feature size from EfficientNet
-        self.eoa = EstimateObjectAttention(feature_size, support_vector_size=10)
-        self.eaa = EstimateAttributeAttention(feature_size, support_vector_size=10)
-        self.era = EstimateRelationAttention()
+        super(FrozenBatchNorm2d, self)._load_from_state_dict(
+            state_dict, prefix, local_metadata, strict,
+            missing_keys, unexpected_keys, error_msgs)
 
     def forward(self, x):
-        image_embedding = self.cnn_backbone(x)
-        
-        object_attention = self.eoa(image_embedding)
-        attribute_attention = self.eaa(image_embedding)
-        
-        relation_attention = self.era(object_attention, attribute_attention)
-        
-        return relation_attention
+        # move reshapes to the beginning
+        # to make it fuser-friendly
+        w = self.weight.reshape(1, -1, 1, 1)
+        b = self.bias.reshape(1, -1, 1, 1)
+        rv = self.running_var.reshape(1, -1, 1, 1)
+        rm = self.running_mean.reshape(1, -1, 1, 1)
+        eps = 1e-5
+        scale = w * (rv + eps).rsqrt()
+        bias = b - rm * scale
+        return x * scale + bias
 
-# Initialize the complete model
-model = MyCompleteModel()
-writer = SummaryWriter()
 
-# Tạo dummy input phù hợp với input layer của mô hình
-dummy_input = torch.randn(1, 3, 600, 600)
+class BackboneBase(nn.Module):
 
-# Thêm mô hình vào TensorBoard
-writer.add_graph(model, dummy_input)
-writer.close()
-# Example forward pass with random data
-# x = torch.randn(1, 3, 600, 600)  # Example image tensor (batch size, channels, height, width)
-# relation_attention_scores = model(x)
-# print(relation_attention_scores)
+    def __init__(self, backbone: nn.Module, train_backbone: bool, num_channels: int, return_interm_layers: bool):
+        super().__init__()
+        for name, parameter in backbone.named_parameters():
+            if not train_backbone or 'layer2' not in name and 'layer3' not in name and 'layer4' not in name:
+                parameter.requires_grad_(False)
+        if return_interm_layers:
+            return_layers = {"layer1": "0", "layer2": "1", "layer3": "2", "layer4": "3"}
+        else:
+            return_layers = {'layer4': "0"}
+        self.body = IntermediateLayerGetter(backbone, return_layers=return_layers)
+        self.num_channels = num_channels
+
+    def forward(self, tensor_list: NestedTensor):
+        xs = self.body(tensor_list.tensors)
+        out: Dict[str, NestedTensor] = {}
+        for name, x in xs.items():
+            m = tensor_list.mask
+            assert m is not None
+            mask = F.interpolate(m[None].float(), size=x.shape[-2:]).to(torch.bool)[0]
+            out[name] = NestedTensor(x, mask)
+        return out
+
+
+class Backbone(BackboneBase):
+    """ResNet backbone with frozen BatchNorm."""
+    def __init__(self, name: str,
+                 train_backbone: bool,
+                 return_interm_layers: bool,
+                 dilation: bool):
+        backbone = getattr(torchvision.models, name)(
+            replace_stride_with_dilation=[False, False, dilation],
+            pretrained=is_main_process(), norm_layer=FrozenBatchNorm2d)
+        num_channels = 512 if name in ('resnet18', 'resnet34') else 2048
+        super().__init__(backbone, train_backbone, num_channels, return_interm_layers)
+
+
+class Joiner(nn.Sequential):
+    def __init__(self, backbone, position_embedding):
+        super().__init__(backbone, position_embedding)
+
+    def forward(self, tensor_list: NestedTensor):
+        xs = self[0](tensor_list)
+        out: List[NestedTensor] = []
+        pos = []
+        for name, x in xs.items():
+            out.append(x)
+            # position encoding
+            pos.append(self[1](x).to(x.tensors.dtype))
+
+        return out, pos
+
+
+def build_backbone():
+    position_embedding = build_position_encoding()
+    train_backbone = 1e-5
+    return_interm_layers = True
+    backbone = Backbone('resnet50', train_backbone, return_interm_layers, dilation=True)
+    model = Joiner(backbone, position_embedding)
+    model.num_channels = backbone.num_channels
+    print(model.num_channels)
+    return model

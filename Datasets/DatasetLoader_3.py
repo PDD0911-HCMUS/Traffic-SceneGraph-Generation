@@ -7,7 +7,8 @@ from torch.utils.data import Dataset, DataLoader
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import Util as ults
+import Datasets.Util as ults
+import Datasets.TransformUtils as T
 
 vgRoot = 'Datasets/VisualGenome/'
 
@@ -28,6 +29,7 @@ class MyTransform():
             "train": transforms.Compose(
                 [
                     transforms.Resize(resize),
+                    transforms.Grayscale(num_output_channels=3),  # Chuyển ảnh xám thành ảnh RGB giả
                     transforms.ToTensor(),
                     transforms.Normalize(mean, std),
                 ]
@@ -44,11 +46,39 @@ class MyTransform():
     def __call__(self, image, mode = "train"):
         return self.imageTrans[mode](image)
 
+def make_coco_transforms(image_set):
+
+    normalize = T.Compose([
+        T.ToTensor(),
+        T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ])
+
+    scales = [480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800]
+
+    if image_set == 'train':
+        return T.Compose([
+            T.RandomHorizontalFlip(),
+            T.RandomSelect(
+                T.RandomResize(scales, max_size=1333),
+                T.Compose([
+                    T.RandomResize([400, 500, 600]),
+                    #T.RandomSizeCrop(384, 600), # TODO: cropping causes that some boxes are dropped then no tensor in the relation part! What should we do?
+                    T.RandomResize(scales, max_size=1333),
+                ])
+            ),
+            normalize])
+
+    if image_set == 'val':
+        return T.Compose([
+            T.RandomResize([800], max_size=1333),
+            normalize,
+        ])
+
+    raise ValueError(f'unknown {image_set}')
 
 class DatasetLoader(Dataset):
-    def __init__(self, imageList, annoList, transform = None, mode = 'train'):
+    def __init__(self, imageList, transform = None, mode = 'train'):
         self.imageList = imageList
-        self.annoList = annoList
         self.transform = transform
         self.mode = mode
     
@@ -57,17 +87,19 @@ class DatasetLoader(Dataset):
     
     def __getitem__(self, index):
         imagePath = self.imageList[index]
-        #print(imagePath)
+        # print(imagePath)
         
-
-        annotation = os.path.join(imagePath.replace(vgImg, vgGT).replace('.jpg', '.json'))
-        annotation = open(annotation)
-        annotation = json.load(annotation)
-
+        if(self.mode == 'train'):
+            annotation = open(os.path.join(imagePath.replace(vgImageTrain, vgAnnoTrain).replace('.jpg', '.json')))
+            annotation = json.load(annotation)
+        if(self.mode == 'val'):
+            annotation = open(os.path.join(imagePath.replace(vgImageVal, vgAnnoVal).replace('.jpg', '.json')))
+            annotation = json.load(annotation)
+            
         image = Image.open(imagePath)
         originalSize = image.size
         imageTransform = self.transform(image, self.mode)
-        
+
         sub,subBbox,attributeSub, obj,objBbox,attributeObj, rel = [],[],[], [],[],[], [] 
 
         for item in annotation[:]:
@@ -126,29 +158,22 @@ def ResizeBbox(bbox, inSize, outSize):
 
     return [new_xmin, new_ymin, new_width, new_height]
 
-def GetAllData(imageDir, annoDir):
+def GetAllData(imageDir):
     imageList = []
-    annoList = []
     for item in os.listdir(imageDir):
         #imageList.append(os.path.join(vgRoot + vgImg, item))
         imageList.append(imageDir + '/' + item)
-        annoList.append(annoDir + '/' + item.replace('.jpg', '.json'))
-    return imageList, annoList
-
-def CheckSample(idx, dataset):
-    #print(dataset.__len__())
-    imageTransform, target = dataset.__getitem__(idx)
-    #print(target)
-    imshow(imageTransform)
-    plt.show()
+    return imageList
 
 def BuildDataset(mode):
     dataset = None
+    datasetLoader = None
     if(mode == 'train'):
         imgDir = vgRoot + vgImageTrain
         annDir = vgRoot + vgAnnoTrain
-        dataList = GetAllData(imageDir=imgDir, annoDir=annDir)
+        dataList = GetAllData(imageDir=imgDir)
 
+        #dataset = DatasetLoader(dataList, transform=MyTransform(resize, mean, std), mode=mode)
         dataset = DatasetLoader(dataList, transform=MyTransform(resize, mean, std), mode=mode)
         sampler_train = torch.utils.data.RandomSampler(dataset)
         batch_sampler_train = torch.utils.data.BatchSampler(sampler_train, batch, drop_last=True)
@@ -167,34 +192,17 @@ def BuildDataset(mode):
     return datasetLoader
 
 
-if __name__=='__main__':
-    # trainList = GetAllData(vgRoot+vgImg)
+# if __name__=='__main__':
 
-    # trainDataset = DatasetLoader(trainList, transform=MyTransform(resize, mean, std), mode='train')
-    # sampler_train = torch.utils.data.RandomSampler(trainDataset)
-    # batch_sampler_train = torch.utils.data.BatchSampler(
-    #     sampler_train, batch, drop_last=True)
-    # trainDataLoader = DataLoader(trainDataset, batch_sampler=batch_sampler_train, collate_fn=ults.collate_fn)
-
-    
-    trainDataLoader = BuildDataset(mode='train')
-    dataloaderDict = {
-        "train": trainDataLoader,
-        "val": None
-    }
-    batchIter = iter(dataloaderDict['train'])
-    inputs, target = next(batchIter)
-    print(len(target))
-    print(target[0])
-    imshow(inputs.tensors[0])
-
-
-    #print(trainDataset.__len__())
-    # index = 10
-    # imageTransform, target = trainDataset.__getitem__(index)
-    # print(target)
-    #print(inputs.tensors[0].size())
-    #imshow(inputs.tensors[0])
-    #imshow(imageTransform)
-
-    plt.show()
+#     trainDataLoader = BuildDataset(mode='train')
+#     validDataLoader = BuildDataset(mode='valid')
+#     dataloaderDict = {
+#         "train": trainDataLoader,
+#         "val": validDataLoader
+#     }
+#     batchIter = iter(dataloaderDict['train'])
+#     inputs, target = next(batchIter)
+#     print(len(target))
+#     print(target[0])
+#     imshow(inputs.tensors[0])
+#     plt.show()
