@@ -101,6 +101,7 @@ class DatasetLoader(Dataset):
         imageTransform = self.transform(image, self.mode)
 
         sub,subBbox,attributeSub, obj,objBbox,attributeObj, rel = [],[],[], [],[],[], [] 
+        pairBox = []
 
         for item in annotation[:]:
             newSubBbox = ResizeBbox(item['bbox_sub'],originalSize, resize)
@@ -109,17 +110,20 @@ class DatasetLoader(Dataset):
             subBbox.append(newSubBbox)
             objBbox.append(newObjBbox)
 
+            pairBox.append(newSubBbox + newObjBbox)
+
             sub.append(item['id_sub'])
             obj.append(item['id_obj'])
 
-            attributeSub.append(item['attr_sub_id'])
-            attributeObj.append(item['attr_obj_id'])
+            attributeSub.append(item['attr_sub_id'][0])
+            attributeObj.append(item['attr_obj_id'][0])
 
             rel.append(item['rel_id'])
 
         target = {
             'subBbox': torch.tensor(subBbox),
             'objBbox': torch.tensor(objBbox),
+            'pairBox': torch.tensor(pairBox),
             'sub': torch.tensor(sub),
             'obj': torch.tensor(obj),
             'attributeSub': torch.tensor(attributeSub),
