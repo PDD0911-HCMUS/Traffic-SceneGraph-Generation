@@ -1,5 +1,5 @@
 from Datasets.DatasetLoader_3 import BuildDataset, imshow
-from Datasets.Util import nested_tensor_from_tensor_list, get_rank
+from Datasets.Util import nested_tensor_from_tensor_list, get_rank, is_main_process
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 from ModelCreation.ComponentsModel_relt import build
@@ -9,6 +9,7 @@ from tqdm import tqdm
 from TrainEngine import train_one_epoch
 import numpy as np
 import random
+import json
 
 from torch.utils.tensorboard import SummaryWriter
 
@@ -18,6 +19,8 @@ if __name__ == '__main__':
     np.random.seed(seed)
     random.seed(seed)
     device = torch.device('cpu')
+    lr_drop = 200
+    ouputDir = 'CheckPoint'
 
     # dataloaderDict = {
     #     "train": trainDataLoader,
@@ -31,7 +34,7 @@ if __name__ == '__main__':
     # imshow(inputs.tensors[0])
     # plt.show()
 
-    model, matcher, criterion = build()
+    model, criterion = build()
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('number of params:', n_parameters)
@@ -44,7 +47,7 @@ if __name__ == '__main__':
     ]
     optimizer = torch.optim.AdamW(param_dicts, lr=1e-4,
                                   weight_decay=1e-4)
-    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 200)
+    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, lr_drop)
 
     trainDataLoader = BuildDataset(mode='train')
     validDataLoader = BuildDataset(mode='valid')
@@ -55,6 +58,10 @@ if __name__ == '__main__':
             model, criterion, trainDataLoader, optimizer, device, epoch,
             0.1)
         lr_scheduler.step()
+        checkpoint_paths = [ouputDir / 'checkpoint.pth']
+        if (epoch + 1) % lr_drop == 0 or (epoch + 1) % 100 == 0:
+            checkpoint_paths.append(ouputDir / f'checkpoint{epoch:04}.pth')
+
         ###
         # TODO: make evaluation in here
         ###
@@ -62,6 +69,10 @@ if __name__ == '__main__':
                     #  **{f'test_{k}': v for k, v in test_stats.items()},
                      'epoch': epoch,
                      'n_parameters': n_parameters}
+        
+        if ouputDir and is_main_process():
+            with (ouputDir / "log.txt").open("a") as f:
+                f.write(json.dumps(log_stats) + "\n")
     
     # for images, targets in tqdm(trainDataLoader):
     #     out=model(images)

@@ -258,6 +258,7 @@ def reduce_dict(input_dict, average=True):
     have the averaged results. Returns a dict with the same fields as
     input_dict, after reduction.
     """
+    #print('input_dict: ', input_dict)
     world_size = get_world_size()
     if world_size < 2:
         return input_dict

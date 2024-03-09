@@ -53,7 +53,8 @@ class HungarianMatcher(nn.Module):
             For each batch element, it holds:
                 len(index_i) = len(index_j) = min(num_queries, num_target_boxes)
         """
-        bs, num_queries = outputs["pred_sub_logits"].shape[:2]
+        bs_sub, num_queries_sub = outputs["pred_sub_logits"].shape[:2]
+        bs_obj, num_queries_obj = outputs["pred_obj_logits"].shape[:2]
 
         # We flatten to compute the cost matrices in a batch
         out_prob_sub = outputs["pred_sub_logits"].flatten(0, 1).softmax(-1)  # [batch_size * num_queries, num_classes]
@@ -87,16 +88,21 @@ class HungarianMatcher(nn.Module):
         cost_giou_obj = -generalized_box_iou(box_cxcywh_to_xyxy(out_bbox_obj), box_cxcywh_to_xyxy(tgt_bbox_obj))
 
         # Final cost matrix
-        C = self.cost_bbox * (cost_bbox_sub + cost_bbox_obj) + \
-            self.cost_class * (cost_class_sub + cost_class_obj) + \
-            self.cost_giou * (cost_giou_sub + cost_giou_obj)
-        C = C.view(bs, num_queries, -1).cpu()
+        C_sub = self.cost_bbox * cost_bbox_sub + \
+            self.cost_class * cost_class_sub + \
+            self.cost_giou * cost_giou_sub 
+        C_sub = C_sub.view(bs_sub, num_queries_sub, -1).cpu()
+
+        C_obj = self.cost_bbox * cost_bbox_obj + \
+            self.cost_class * cost_class_obj + \
+            self.cost_giou * cost_giou_obj
+        C_obj = C_obj.view(bs_obj, num_queries_obj, -1).cpu()
 
         sizes_sub = [len(v["subBbox"]) for v in targets]
-        indices_sub = [linear_sum_assignment(c[i]) for i, c in enumerate(C.split(sizes_sub, -1))]
+        indices_sub = [linear_sum_assignment(c[i]) for i, c in enumerate(C_sub.split(sizes_sub, -1))]
 
         sizes_obj = [len(v["objBbox"]) for v in targets]
-        indices_obj = [linear_sum_assignment(c[i]) for i, c in enumerate(C.split(sizes_obj, -1))]
+        indices_obj = [linear_sum_assignment(c[i]) for i, c in enumerate(C_obj.split(sizes_obj, -1))]
 
         return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices_sub], \
                [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices_obj]

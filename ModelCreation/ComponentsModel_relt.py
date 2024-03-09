@@ -46,8 +46,8 @@ class SGG(nn.Module):
         
         self.class_sub_embed = nn.Linear(hidden_dim, num_classes + 1)
         self.class_obj_embed = nn.Linear(hidden_dim, num_classes + 1)
-        self.bbox_sub_embed = MLP(hidden_dim, hidden_dim, 4, 3) #8 coordinates for 2 boxes
-        self.bbox_obj_embed = MLP(hidden_dim, hidden_dim, 4, 3) #8 coordinates for 2 boxes
+        self.bbox_sub_embed = MLP(hidden_dim, hidden_dim, 4, 3) 
+        self.bbox_obj_embed = MLP(hidden_dim, hidden_dim, 4, 3) 
 
         self.rel_class_embed = MLP(hidden_dim*2 + 128, hidden_dim, num_rel + 1, 2)
 
@@ -87,14 +87,11 @@ class SGG(nn.Module):
         
         hs_map = self.so_mask_fc(hs_map)
 
-        # print('hs: ', hs.size())
-        # print('hs_att: ', hs_att.size())
-        # print('hs_map: ', hs_map.size())
-
         outputs_sub_class = self.class_sub_embed(hs)
         outputs_obj_class = self.class_obj_embed(hs)
         outputs_coord_sub = self.bbox_sub_embed(hs).sigmoid()
         outputs_coord_obj = self.bbox_obj_embed(hs).sigmoid()
+
         outputs_rel = self.rel_class_embed(torch.cat((hs, hs_att, hs_map), dim=-1))
 
         out = {'pred_sub_logits': outputs_sub_class[-1],
@@ -127,9 +124,15 @@ class SetCriterion(nn.Module):
         self.weight_dict = weight_dict
         self.eos_coef = eos_coef
         self.losses = losses
-        empty_weight = torch.ones(self.num_classes + 1)
-        empty_weight[-1] = self.eos_coef
-        self.register_buffer('empty_weight', empty_weight)
+
+        empty_weight_sub = torch.ones(self.num_classes + 1)
+        empty_weight_obj = torch.ones(self.num_classes + 1)
+
+        empty_weight_sub[-1] = self.eos_coef
+        empty_weight_obj[-1] = self.eos_coef
+
+        self.register_buffer('empty_weight_sub', empty_weight_sub)
+        self.register_buffer('empty_weight_obj', empty_weight_obj)
 
     def loss_labels(self, outputs, targets, indices, num_boxes, log=True):
         """Classification loss (NLL)
@@ -153,18 +156,20 @@ class SetCriterion(nn.Module):
                                     dtype=torch.int64, device=src_logits_obj.device)
         target_classes_obj[idx_obj] = target_classes_obj_o
 
-        loss_ce_sub = F.cross_entropy(src_logits_sub.transpose(1, 2), target_classes_sub, self.empty_weight)
-        loss_ce_obj = F.cross_entropy(src_logits_obj.transpose(1, 2), target_classes_obj, self.empty_weight)
+        loss_ce_sub = F.cross_entropy(src_logits_sub.transpose(1, 2), target_classes_sub, self.empty_weight_sub)
+        loss_ce_obj = F.cross_entropy(src_logits_obj.transpose(1, 2), target_classes_obj, self.empty_weight_obj)
 
+        losses = {'loss_ce_sub': loss_ce_sub}
+        losses = {'loss_ce_obj': loss_ce_obj}
         losses = {'loss_ce': loss_ce_sub + loss_ce_obj}
 
         if log:
             # TODO this should probably be a separate loss, not hacked in this one here
-            losses['class_error'] = 100 - \
-                (accuracy(src_logits_sub[idx_sub], target_classes_sub_o)[0] + accuracy(src_logits_obj[idx_obj], target_classes_obj_o)[0])
+            losses['class_error_sub'] = 100 - accuracy(src_logits_sub[idx_sub], target_classes_sub_o)[0]
+            losses['class_error_obj'] = 100 - accuracy(src_logits_obj[idx_obj], target_classes_obj_o)[0]
         return losses
     
-    def loss_boxes(self, outputs, targets, indices, num_boxes):
+    def loss_boxes(self, outputs, targets, indices, num_boxes_sub, num_boxes_obj):
         """Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
            targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
            The target boxes are expected in format (center_x, center_y, w, h), normalized by the image size.
@@ -176,9 +181,6 @@ class SetCriterion(nn.Module):
         outputs_pred_boxes_sub = outputs['pred_boxes_sub']
         outputs_pred_boxes_obj = outputs['pred_boxes_obj']
 
-        # print(idx_sub[1].size())
-        # print(outputs_pred_boxes_sub.size())
-
         src_boxes_sub = outputs_pred_boxes_sub[idx_sub]
         src_boxes_obj = outputs_pred_boxes_obj[idx_obj]
 
@@ -189,7 +191,10 @@ class SetCriterion(nn.Module):
         loss_bbox_obj = F.l1_loss(src_boxes_obj, target_boxes_obj, reduction='none')
 
         losses = {}
-        losses['loss_bbox'] = (loss_bbox_sub.sum() + loss_bbox_obj.sum()) / num_boxes
+        losses['loss_bbox_sub'] = loss_bbox_sub.sum() / num_boxes_sub
+        losses['loss_bbox_obj'] = loss_bbox_obj.sum() / num_boxes_obj
+        # losses['loss_bbox'] = (loss_bbox_sub.sum() + loss_bbox_obj.sum()) / num_boxes
+        losses['loss_bbox'] = (loss_bbox_sub.sum() + loss_bbox_obj.sum())
 
         loss_giou_sub = 1 - torch.diag(generalized_box_iou(
             box_cxcywh_to_xyxy(src_boxes_sub),
@@ -199,11 +204,15 @@ class SetCriterion(nn.Module):
             box_cxcywh_to_xyxy(src_boxes_obj),
             box_cxcywh_to_xyxy(target_boxes_obj)))
         
-        losses['loss_giou'] = (loss_giou_sub.sum() + loss_giou_obj.sum()) / num_boxes
+        losses['loss_giou_sub'] = loss_giou_sub.sum() / num_boxes_sub
+        losses['loss_giou_obj'] = loss_giou_obj.sum() / num_boxes_obj
+        # losses['loss_giou'] = (loss_giou_sub.sum() + loss_giou_obj.sum()) / num_boxes
+        losses['loss_giou'] = (loss_giou_sub.sum() + loss_giou_obj.sum())
+
         return losses
     
     @torch.no_grad()
-    def loss_cardinality(self, outputs, targets, indices, num_boxes):
+    def loss_cardinality(self, outputs, targets, indices, num_boxes_sub, num_boxes_obj):
         """ Compute the cardinality error, ie the absolute error in the number of predicted non-empty boxes
         This is not really a loss, it is intended for logging purposes only. It doesn't propagate gradients
         """
@@ -221,10 +230,12 @@ class SetCriterion(nn.Module):
 
         card_err_sub = F.l1_loss(card_pred_sub.float(), tgt_lengths_sub.float())
         card_err_obj = F.l1_loss(card_pred_obj.float(), tgt_lengths_obj.float())
-        losses = {'cardinality_error': card_err_sub}
+
+        losses = {'cardinality_error_sub': card_err_sub}
+        losses = {'cardinality_error_obj': card_err_obj}
         return losses
 
-    def loss_relations(self, outputs, targets, indices, num_boxes, log=True):
+    def loss_relations(self, outputs, targets, indices, num_boxes_sub, num_boxes_obj, log=True):
         """Compute the predicate classification loss
         """
         assert 'rel_logits' in outputs
@@ -254,15 +265,15 @@ class SetCriterion(nn.Module):
         tgt_idx = torch.cat([tgt for (_, tgt) in indices])
         return batch_idx, tgt_idx
     
-    def get_loss(self, loss, outputs, targets, indices, num_boxes, **kwargs):
+    def get_loss(self, loss, outputs, targets, indices, num_boxes_sub, num_boxes_obj, **kwargs):
         loss_map = {
             'labels': self.loss_labels,
             'cardinality': self.loss_cardinality,
             'boxes': self.loss_boxes,
-            'relations': self.loss_relations
+            #'relations': self.loss_relations
         }
         assert loss in loss_map, f'do you really want to compute {loss} loss?'
-        return loss_map[loss](outputs, targets, indices, num_boxes, **kwargs)
+        return loss_map[loss](outputs, targets, indices, num_boxes_sub, num_boxes_obj, **kwargs)
     
     def forward(self, outputs, targets):
         """ This performs the loss computation.
@@ -277,16 +288,23 @@ class SetCriterion(nn.Module):
         indices = self.matcher(outputs_without_aux, targets)
 
         # Compute the average number of target boxes accross all nodes, for normalization purposes
-        num_boxes = sum(len(t["sub"]) + len(t["obj"]) for t in targets)
-        num_boxes = torch.as_tensor([num_boxes], dtype=torch.float, device=next(iter(outputs.values())).device)
+        num_boxes_sub = sum(len(t["sub"]) for t in targets)
+        num_boxes_sub = torch.as_tensor([num_boxes_sub], dtype=torch.float, device=next(iter(outputs.values())).device)
+
+        num_boxes_obj = sum(len(t["obj"]) for t in targets)
+        num_boxes_obj = torch.as_tensor([num_boxes_obj], dtype=torch.float, device=next(iter(outputs.values())).device)
+
         if is_dist_avail_and_initialized():
-            torch.distributed.all_reduce(num_boxes)
-        num_boxes = torch.clamp(num_boxes / get_world_size(), min=1).item()
+            torch.distributed.all_reduce(num_boxes_sub)
+            torch.distributed.all_reduce(num_boxes_obj)
+        
+        num_boxes_sub = torch.clamp(num_boxes_sub / get_world_size(), min=1).item()
+        num_boxes_obj = torch.clamp(num_boxes_obj / get_world_size(), min=1).item()
 
         # Compute all the requested losses
         losses = {}
         for loss in self.losses:
-            losses.update(self.get_loss(loss, outputs, targets, indices, num_boxes))
+            losses.update(self.get_loss(loss, outputs, targets, indices, num_boxes_sub, num_boxes_obj))
 
         # In case of auxiliary losses, we repeat this process with the output of each intermediate layer.
         if 'aux_outputs' in outputs:
@@ -300,7 +318,7 @@ class SetCriterion(nn.Module):
                     if loss == 'labels':
                         # Logging is enabled only for the last layer
                         kwargs = {'log': False}
-                    l_dict = self.get_loss(loss, aux_outputs, targets, indices, num_boxes, **kwargs)
+                    l_dict = self.get_loss(loss, aux_outputs, targets, indices, num_boxes_sub, num_boxes_obj, **kwargs)
                     l_dict = {k + f'_{i}': v for k, v in l_dict.items()}
                     losses.update(l_dict)
 
@@ -308,7 +326,6 @@ class SetCriterion(nn.Module):
 
 def build():
 
-    
     hidden_dim = 256
     num_couple = 100
     num_att=100
@@ -326,8 +343,15 @@ def build():
                 )
     matcher = build_matcher()
 
-    weight_dict = {'loss_ce': 1, 'loss_bbox': 5}
+    weight_dict = {'loss_ce': 1,
+                   'loss_ce_sub':6,
+                   'loss_ce_obj': 7,
+                   'loss_bbox': 5,
+                   'loss_bbox_sub': 3,
+                   'loss_bbox_obj': 4}
     weight_dict['loss_giou'] = 2
+    weight_dict['loss_giou_sub'] = 8
+    weight_dict['loss_giou_obj'] = 9
     losses = ['labels', 'boxes', 'cardinality']
 
     criterion = SetCriterion(num_classes, 
@@ -336,4 +360,4 @@ def build():
                              num_rel_classes= num_rel,
                              eos_coef=0.1, 
                              losses=losses)
-    return model, matcher, criterion
+    return model, criterion
