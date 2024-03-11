@@ -1,6 +1,7 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 """
 Transforms and data augmentation for both image + bbox.
+This is referenced from DETR transform
 """
 import random
 

@@ -5,13 +5,13 @@ from torch.utils.data import Dataset, DataLoader
 from ModelCreation.ComponentsModel_relt import build
 import torch.optim as optim
 import torch
-from tqdm import tqdm
+#from tqdm import tqdm
 from TrainEngine import train_one_epoch
 import numpy as np
 import random
 import json
 
-from torch.utils.tensorboard import SummaryWriter
+#from torch.utils.tensorboard import SummaryWriter
 
 if __name__ == '__main__':
     seed = 42 + get_rank()
