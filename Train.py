@@ -18,7 +18,7 @@ if __name__ == '__main__':
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
-    device = torch.device('cpu')
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     lr_drop = 200
     ouputDir = 'CheckPoint'
 
@@ -33,8 +33,9 @@ if __name__ == '__main__':
     # print(target[0])
     # imshow(inputs.tensors[0])
     # plt.show()
-
-    model, criterion = build()
+    print('Device is being used: ', device)
+    model, criterion = build(device = device)
+    model.to(device)
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('number of params:', n_parameters)

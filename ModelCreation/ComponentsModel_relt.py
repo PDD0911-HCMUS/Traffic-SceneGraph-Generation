@@ -238,11 +238,11 @@ class SetCriterion(nn.Module):
     def loss_relations(self, outputs, targets, indices, num_boxes_sub, num_boxes_obj, log=True):
         """Compute the predicate classification loss
         """
-        assert 'rel_logits' in outputs
+        assert 'pred_rel' in outputs
 
-        src_logits = outputs['rel_logits']
+        src_logits = outputs['pred_rel']
         idx = self._get_src_permutation_idx(indices[1])
-        target_classes_o = torch.cat([t["rel_annotations"][J,2] for t, (_, J) in zip(targets, indices[1])])
+        target_classes_o = torch.cat([t["rel"][J,2] for t, (_, J) in zip(targets, indices[1])])
         target_classes = torch.full(src_logits.shape[:2], self.num_rel_classes, dtype=torch.int64, device=src_logits.device)
         target_classes[idx] = target_classes_o
 
@@ -324,7 +324,7 @@ class SetCriterion(nn.Module):
 
         return losses
 
-def build():
+def build(device):
 
     hidden_dim = 256
     num_couple = 100
@@ -360,4 +360,6 @@ def build():
                              num_rel_classes= num_rel,
                              eos_coef=0.1, 
                              losses=losses)
+    
+    criterion.to(device=device)
     return model, criterion

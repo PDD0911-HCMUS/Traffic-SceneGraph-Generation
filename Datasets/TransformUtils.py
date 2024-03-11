@@ -10,8 +10,11 @@ import torch
 import torchvision.transforms as T
 import torchvision.transforms.functional as F
 
-from Datasets.Util import box_xyxy_to_cxcywh
+from Datasets.Util import box_xyxy_to_cxcywh, box_cxcywh_to_xyxy
 from Datasets.Util import interpolate
+
+# from Util import box_xyxy_to_cxcywh, box_cxcywh_to_xyxy
+# from Util import interpolate
 
 
 def crop(image, target, region):
@@ -73,10 +76,27 @@ def hflip(image, target):
 
     return flipped_image, target
 
+def hflip_so(image, target):
+    flipped_image = F.hflip(image)
+
+    w, h = image.size
+
+    target = target.copy()
+    if "subBbox" in target:
+        boxes = target["subBbox"]
+        boxes = boxes[:, [2, 1, 0, 3]] * torch.as_tensor([-1, 1, -1, 1]) + torch.as_tensor([w, 0, w, 0])
+        target["subBbox"] = boxes
+
+    if "objBbox" in target:
+        boxes = target["objBbox"]
+        boxes = boxes[:, [2, 1, 0, 3]] * torch.as_tensor([-1, 1, -1, 1]) + torch.as_tensor([w, 0, w, 0])
+        target["objBbox"] = boxes
+
+    return flipped_image, target
+
 
 def resize(image, target, size, max_size=None):
     # size can be min_size (scalar) or (w, h) tuple
-
     def get_size_with_aspect_ratio(image_size, size, max_size=None):
         w, h = image_size
         if max_size is not None:
@@ -129,6 +149,61 @@ def resize(image, target, size, max_size=None):
     if "masks" in target:
         target['masks'] = interpolate(
             target['masks'][:, None].float(), size, mode="nearest")[:, 0] > 0.5
+
+    return rescaled_image, target
+
+
+def resize_so(image, target, size, max_size=None):
+    # size can be min_size (scalar) or (w, h) tuple
+
+    def get_size_with_aspect_ratio(image_size, size, max_size=None):
+        w, h = image_size
+        if max_size is not None:
+            min_original_size = float(min((w, h)))
+            max_original_size = float(max((w, h)))
+            if max_original_size / min_original_size * size > max_size:
+                size = int(round(max_size * min_original_size / max_original_size))
+
+        if (w <= h and w == size) or (h <= w and h == size):
+            return (h, w)
+
+        if w < h:
+            ow = size
+            oh = int(size * h / w)
+        else:
+            oh = size
+            ow = int(size * w / h)
+
+        return (oh, ow)
+
+    def get_size(image_size, size, max_size=None):
+        if isinstance(size, (list, tuple)):
+            return size[::-1]
+        else:
+            return get_size_with_aspect_ratio(image_size, size, max_size)
+
+    size = get_size(image.size, size, max_size)
+    rescaled_image = F.resize(image, size)
+
+    if target is None:
+        return rescaled_image, None
+
+    ratios = tuple(float(s) / float(s_orig) for s, s_orig in zip(rescaled_image.size, image.size))
+    ratio_width, ratio_height = ratios
+
+    target = target.copy()
+    if "subBbox" in target:
+        boxes_sub = target["subBbox"]
+        scaled_boxes_sub = boxes_sub * torch.as_tensor([ratio_width, ratio_height, ratio_width, ratio_height])
+        target["subBbox"] = scaled_boxes_sub
+
+    if "objBbox" in target:
+        boxes_obj = target["objBbox"]
+        scaled_boxes_obj = boxes_obj * torch.as_tensor([ratio_width, ratio_height, ratio_width, ratio_height])
+        target["objBbox"] = scaled_boxes_obj
+
+    h, w = size
+    target["size"] = torch.tensor([h, w])
 
     return rescaled_image, target
 
@@ -187,6 +262,15 @@ class RandomHorizontalFlip(object):
         if random.random() < self.p:
             return hflip(img, target)
         return img, target
+    
+class RandomHorizontalFlipSO(object):
+    def __init__(self, p=0.5):
+        self.p = p
+
+    def __call__(self, img, target):
+        if random.random() < self.p:
+            return hflip_so(img, target)
+        return img, target
 
 
 class RandomResize(object):
@@ -198,6 +282,16 @@ class RandomResize(object):
     def __call__(self, img, target=None):
         size = random.choice(self.sizes)
         return resize(img, target, size, self.max_size)
+    
+class RandomResizeSO(object):
+    def __init__(self, sizes, max_size=None):
+        assert isinstance(sizes, (list, tuple))
+        self.sizes = sizes
+        self.max_size = max_size
+
+    def __call__(self, img, target=None):
+        size = random.choice(self.sizes)
+        return resize_so(img, target, size, self.max_size)
 
 
 class RandomPad(object):
@@ -256,6 +350,32 @@ class Normalize(object):
             boxes = box_xyxy_to_cxcywh(boxes)
             boxes = boxes / torch.tensor([w, h, w, h], dtype=torch.float32)
             target["boxes"] = boxes
+        return image, target
+    
+class NormalizeSO(object):
+    def __init__(self, mean, std):
+        self.mean = mean
+        self.std = std
+
+    def __call__(self, image, target=None):
+        image = F.normalize(image, mean=self.mean, std=self.std)
+        if target is None:
+            return image, None
+        target = target.copy()
+        h, w = image.shape[-2:]
+        if "subBbox" in target:
+            boxes_sub = target["subBbox"]
+            boxes_sub = box_cxcywh_to_xyxy(boxes_sub)
+            boxes_sub = box_xyxy_to_cxcywh(boxes_sub)
+            boxes_sub = boxes_sub / torch.tensor([w, h, w, h], dtype=torch.float32)
+            target["subBbox"] = boxes_sub
+
+        if "objBbox" in target:
+            boxes_obj = target["objBbox"]
+            boxes_obj = box_cxcywh_to_xyxy(boxes_obj)
+            boxes_obj = box_xyxy_to_cxcywh(boxes_obj)
+            boxes_obj = boxes_obj / torch.tensor([w, h, w, h], dtype=torch.float32)
+            target["objBbox"] = boxes_obj
         return image, target
 
 

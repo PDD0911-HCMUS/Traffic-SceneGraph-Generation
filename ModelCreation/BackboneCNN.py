@@ -115,5 +115,5 @@ def build_backbone():
     backbone = Backbone('resnet50', train_backbone, return_interm_layers, dilation=True)
     model = Joiner(backbone, position_embedding)
     model.num_channels = backbone.num_channels
-    print(model.num_channels)
+    # print(model.num_channels)
     return model
