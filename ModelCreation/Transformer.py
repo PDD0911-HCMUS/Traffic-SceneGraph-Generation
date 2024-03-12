@@ -63,10 +63,11 @@ class Transformer(nn.Module):
         att_entity = torch.zeros_like(att_embed)
 
         memory = self.encoder(src, src_key_padding_mask=mask, pos=pos_embed)
-        hs, hs_att, hs_map = self.decoder(cp_entities, att_entity, memory, memory_key_padding_mask=mask,
+        hs, hs_map = self.decoder(cp_entities, att_entity, memory, memory_key_padding_mask=mask,
                           pos=pos_embed, cp_pos=cp_embed, att_pos = att_embed)
-        return hs.transpose(1, 2), hs_att.transpose(1, 2), hs_map.reshape(hs_map.shape[0], bs, hs_map.shape[2], 1, h, w) \
-            , memory.permute(1, 2, 0).view(bs, c, h, w)
+        return  hs.transpose(1, 2),\
+                hs_map.reshape(hs_map.shape[0], bs, hs_map.shape[2], 1, h, w),\
+                memory.permute(1, 2, 0).view(bs, c, h, w)
 
 
 class TransformerEncoder(nn.Module):
@@ -115,23 +116,21 @@ class TransformerDecoder(nn.Module):
         ouput_att = att_entity
 
         intermediate_cp = []
-        intermediate_att = []
         intermediate_fmap = []
 
 
         for layer in self.layers:
-            output_cp, ouput_att, cp_maps = layer(output_cp, ouput_att, cp_pos, att_pos, 
+            output, cp_maps = layer(output_cp, ouput_att, cp_pos, att_pos, 
                                                   memory, tgt_mask=tgt_mask, memory_mask=memory_mask,
                                                   tgt_key_padding_mask=tgt_key_padding_mask,
                                                   memory_key_padding_mask=memory_key_padding_mask, pos=pos)
             if self.return_intermediate:
-                intermediate_cp.append(output_cp)
-                intermediate_att.append(ouput_att)
+                intermediate_cp.append(output)
                 intermediate_fmap.append(cp_maps)
 
 
         if self.return_intermediate:
-            return torch.stack(intermediate_cp),torch.stack(intermediate_att),torch.stack(intermediate_fmap)
+            return torch.stack(intermediate_cp),torch.stack(intermediate_fmap)
 
         #return output.unsqueeze(0)
 
@@ -197,7 +196,7 @@ class TransformerDecoderLayer(nn.Module):
         self.dropout2_cp = nn.Dropout(dropout)
         self.dropout3_cp = nn.Dropout(dropout)
 
-        '''Attribuite object section'''
+        '''Attribuite object section (To expand information about graph)'''
         self.self_attn_att = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
         self.multihead_attn_att = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
         # Implementation of Feedforward model
@@ -216,9 +215,11 @@ class TransformerDecoderLayer(nn.Module):
         return tensor if pos is None else tensor + pos
 
     def forward(self, tgt_cp, tgt_att, query_pos_cp, query_pos_att,
-                memory, tgt_mask: Optional[Tensor] = None, memory_mask: Optional[Tensor] = None,
+                memory, tgt_mask: Optional[Tensor] = None, 
+                memory_mask: Optional[Tensor] = None,
                 tgt_key_padding_mask: Optional[Tensor] = None,
-                memory_key_padding_mask: Optional[Tensor] = None, pos: Optional[Tensor] = None):
+                memory_key_padding_mask: Optional[Tensor] = None, 
+                pos: Optional[Tensor] = None):
         
         '''Couple object layer'''
         q_cp = k_cp = self.with_pos_embed(tgt_cp, query_pos_cp)
@@ -251,7 +252,10 @@ class TransformerDecoderLayer(nn.Module):
         tgt2_att = self.linear2_att(self.dropout_att(self.activation(self.linear1_att(tgt_att))))
         tgt_att = tgt_att + self.dropout3_att(tgt2_att)
         tgt_att = self.norm3_att(tgt_att)
-        return tgt_cp, tgt_att, cp_maps
+
+        tgt = tgt_cp + tgt_att
+        return tgt, cp_maps
+        #return tgt_cp, tgt_att, cp_maps
 
 
 def _get_clones(module, N):

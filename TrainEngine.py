@@ -67,7 +67,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
 
 @torch.no_grad()
-def evaluate(model, criterion, data_loader, device, output_dir):
+def evaluate(model, criterion, data_loader, device):
     model.eval()
     criterion.eval()
 

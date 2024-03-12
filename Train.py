@@ -5,13 +5,13 @@ from torch.utils.data import Dataset, DataLoader
 from ModelCreation.ComponentsModel_relt import build
 import torch.optim as optim
 import torch
-#from tqdm import tqdm
-from TrainEngine import train_one_epoch
+from tqdm import tqdm
+from TrainEngine import train_one_epoch, evaluate
 import numpy as np
 import random
 import json
 
-#from torch.utils.tensorboard import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 
 if __name__ == '__main__':
     seed = 42 + get_rank()
@@ -36,6 +36,7 @@ if __name__ == '__main__':
     print('Device is being used: ', device)
     model, criterion = build(device = device)
     model.to(device)
+    writer = SummaryWriter()
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('number of params:', n_parameters)
@@ -65,26 +66,31 @@ if __name__ == '__main__':
 
         ###
         # TODO: make evaluation in here
+        test_stats = evaluate(model, criterion, validDataLoader, device)
         ###
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
-                    #  **{f'test_{k}': v for k, v in test_stats.items()},
+                     **{f'test_{k}': v for k, v in test_stats.items()},
                      'epoch': epoch,
                      'n_parameters': n_parameters}
         
         if ouputDir and is_main_process():
             with (ouputDir / "log.txt").open("a") as f:
                 f.write(json.dumps(log_stats) + "\n")
-    
+
+
     # for images, targets in tqdm(trainDataLoader):
     #     out=model(images)
     #     # print('source size: ', src.size())
     #     # print('mask size: ',mask.size())
     #     # print(cp.size())
     #     # print(hs.size())
+        
     #     print('pred_sub_logits: ', out['pred_sub_logits'].size())
     #     print('pred_obj_logits: ', out['pred_obj_logits'].size())
     #     print('pred_boxes_sub: ', out['pred_boxes_sub'].size())
     #     print('pred_boxes_obj: ', out['pred_boxes_obj'].size())
+    #     writer.add_graph(model, images)
+    #     writer.close()
     #     # print('pred_rel: ', out['pred_rel'].size())
     #     # sizes = [len(v["subBbox"]) for v in targets]
     #     # print(sizes)

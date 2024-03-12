@@ -49,7 +49,7 @@ class SGG(nn.Module):
         self.bbox_sub_embed = MLP(hidden_dim, hidden_dim, 4, 3) 
         self.bbox_obj_embed = MLP(hidden_dim, hidden_dim, 4, 3) 
 
-        self.rel_class_embed = MLP(hidden_dim*2 + 128, hidden_dim, num_rel + 1, 2)
+        self.rel_class_embed = MLP(hidden_dim + 128, hidden_dim, num_rel + 1, 2)
 
 
         self.cp_embed = nn.Embedding(num_couple, hidden_dim)
@@ -81,10 +81,10 @@ class SGG(nn.Module):
 
         assert mask is not None
         #hs = self.transformer(self.input_proj(src), mask, self.cp_embed.weight, self.att_embed.weight, pos[-1])[0]
-        hs, hs_att, hs_map, _ = self.transformer(self.input_proj(src), mask, self.cp_embed.weight, self.att_embed.weight, pos[-1])
+        hs, hs_map, _ = self.transformer(self.input_proj(src), mask, self.cp_embed.weight, self.att_embed.weight, pos[-1])
+
         hs_map = hs_map.detach()
         hs_map = self.so_mask_conv(hs_map.view(-1, 2, src.shape[-2],src.shape[-1])).view(hs.shape[0], hs.shape[1], hs.shape[2],-1)
-        
         hs_map = self.so_mask_fc(hs_map)
 
         outputs_sub_class = self.class_sub_embed(hs)
@@ -92,28 +92,28 @@ class SGG(nn.Module):
         outputs_coord_sub = self.bbox_sub_embed(hs).sigmoid()
         outputs_coord_obj = self.bbox_obj_embed(hs).sigmoid()
 
-        outputs_rel = self.rel_class_embed(torch.cat((hs, hs_att, hs_map), dim=-1))
+        outputs_rel = self.rel_class_embed(torch.cat((hs, hs_map), dim=-1))
 
         out = {'pred_sub_logits': outputs_sub_class[-1],
                'pred_obj_logits': outputs_obj_class[-1], 
                'pred_boxes_sub': outputs_coord_sub[-1],
                'pred_boxes_obj': outputs_coord_obj[-1],
-               'pred_rel': outputs_rel[-1]
+               'pred_rel': outputs_rel[-1],
                #'rel_logits': outputs_class_rel[-1]
                }
         
         if self.aux_loss:
-            out['aux_outputs'] = self._set_aux_loss(outputs_sub_class, outputs_obj_class, outputs_coord_sub, outputs_coord_obj)
+            out['aux_outputs'] = self._set_aux_loss(outputs_sub_class, outputs_obj_class, outputs_coord_sub, outputs_coord_obj, outputs_rel)
 
         return out
     
     @torch.jit.unused
-    def _set_aux_loss(self, outputs_sub_class, outputs_obj_class, outputs_coord_sub, outputs_coord_obj):
+    def _set_aux_loss(self, outputs_sub_class, outputs_obj_class, outputs_coord_sub, outputs_coord_obj, outputs_rel):
         # this is a workaround to make torchscript happy, as torchscript
         # doesn't support dictionary with non-homogeneous values, such
         # as a dict having both a Tensor and a list.
-        return [{'pred_sub_logits': a, 'pred_obj_logits': b, 'pred_boxes_sub': c, 'pred_boxes_obj': d}
-                for a, b, c, d in zip(outputs_sub_class[:-1], outputs_obj_class[-1], outputs_coord_sub[:-1], outputs_coord_obj[-1])]
+        return [{'pred_sub_logits': a, 'pred_obj_logits': b, 'pred_boxes_sub': c, 'pred_boxes_obj': d, 'pred_rel': e}
+                for a, b, c, d, e in zip(outputs_sub_class[:-1], outputs_obj_class[-1], outputs_coord_sub[:-1], outputs_coord_obj[-1], outputs_rel[-1])]
 
 class SetCriterion(nn.Module):
     def __init__(self, num_classes, num_rel_classes, matcher, weight_dict, eos_coef, losses) -> None:
@@ -207,7 +207,7 @@ class SetCriterion(nn.Module):
         losses['loss_giou_sub'] = loss_giou_sub.sum() / num_boxes_sub
         losses['loss_giou_obj'] = loss_giou_obj.sum() / num_boxes_obj
         # losses['loss_giou'] = (loss_giou_sub.sum() + loss_giou_obj.sum()) / num_boxes
-        losses['loss_giou'] = (loss_giou_sub.sum() + loss_giou_obj.sum())
+        losses['loss_giou'] = losses['loss_giou_sub'] + losses['loss_giou_obj']
 
         return losses
     

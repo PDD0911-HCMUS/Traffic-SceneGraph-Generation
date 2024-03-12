@@ -20,7 +20,7 @@ vgAnnoTrain = 'Train/target'
 
 vgImageVal = 'Val/image'
 vgAnnoVal = 'Val/target'
-batch = 1
+batch = 2
 
 def make_coco_transforms(image_set):
 
