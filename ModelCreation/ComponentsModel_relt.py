@@ -116,23 +116,27 @@ class SGG(nn.Module):
                 for a, b, c, d, e in zip(outputs_sub_class[:-1], outputs_obj_class[-1], outputs_coord_sub[:-1], outputs_coord_obj[-1], outputs_rel[-1])]
 
 class SetCriterion(nn.Module):
-    def __init__(self, num_classes, num_rel_classes, matcher, weight_dict, eos_coef, losses) -> None:
+    def __init__(self, num_classes, num_rel_classes, matcher, weight_dict, eos_coef, losses):
         super().__init__()
         self.num_classes= num_classes
-        self.num_rel_classes = num_rel_classes,
+        self.num_rel_classes = num_rel_classes
         self.matcher = matcher
         self.weight_dict = weight_dict
         self.eos_coef = eos_coef
         self.losses = losses
-
         empty_weight_sub = torch.ones(self.num_classes + 1)
         empty_weight_obj = torch.ones(self.num_classes + 1)
+        empty_weight_rel = torch.ones(self.num_rel_classes + 1)
 
         empty_weight_sub[-1] = self.eos_coef
         empty_weight_obj[-1] = self.eos_coef
+        empty_weight_rel[-1] = self.eos_coef
+
+        
 
         self.register_buffer('empty_weight_sub', empty_weight_sub)
         self.register_buffer('empty_weight_obj', empty_weight_obj)
+        self.register_buffer('empty_weight_rel', empty_weight_rel)
 
     def loss_labels(self, outputs, targets, indices, num_boxes, log=True):
         """Classification loss (NLL)
@@ -241,8 +245,8 @@ class SetCriterion(nn.Module):
         assert 'pred_rel' in outputs
 
         src_logits = outputs['pred_rel']
-        idx = self._get_src_permutation_idx(indices[1])
-        target_classes_o = torch.cat([t["rel"][J,2] for t, (_, J) in zip(targets, indices[1])])
+        idx = self._get_src_permutation_idx(indices[2])
+        target_classes_o = torch.cat([t["rel"][J] for t, (_, J) in zip(targets, indices[2])])
         target_classes = torch.full(src_logits.shape[:2], self.num_rel_classes, dtype=torch.int64, device=src_logits.device)
         target_classes[idx] = target_classes_o
 
@@ -270,7 +274,7 @@ class SetCriterion(nn.Module):
             'labels': self.loss_labels,
             'cardinality': self.loss_cardinality,
             'boxes': self.loss_boxes,
-            #'relations': self.loss_relations
+            'relations': self.loss_relations
         }
         assert loss in loss_map, f'do you really want to compute {loss} loss?'
         return loss_map[loss](outputs, targets, indices, num_boxes_sub, num_boxes_obj, **kwargs)
@@ -311,11 +315,8 @@ class SetCriterion(nn.Module):
             for i, aux_outputs in enumerate(outputs['aux_outputs']):
                 indices = self.matcher(aux_outputs, targets)
                 for loss in self.losses:
-                    if loss == 'masks':
-                        # Intermediate masks losses are too costly to compute, we ignore them.
-                        continue
                     kwargs = {}
-                    if loss == 'labels':
+                    if loss == 'labels' or loss == 'relations':
                         # Logging is enabled only for the last layer
                         kwargs = {'log': False}
                     l_dict = self.get_loss(loss, aux_outputs, targets, indices, num_boxes_sub, num_boxes_obj, **kwargs)
@@ -348,12 +349,14 @@ def build(device):
                    'loss_ce_obj': 7,
                    'loss_bbox': 5,
                    'loss_bbox_sub': 3,
-                   'loss_bbox_obj': 4}
+                   'loss_bbox_obj': 4
+                   }
     weight_dict['loss_giou'] = 2
     weight_dict['loss_giou_sub'] = 8
     weight_dict['loss_giou_obj'] = 9
-    losses = ['labels', 'boxes', 'cardinality']
-
+    weight_dict['loss_rel'] = 10
+    losses = ['labels', 'boxes', 'cardinality', 'relations']
+    print(num_rel)
     criterion = SetCriterion(num_classes, 
                              matcher=matcher, 
                              weight_dict=weight_dict, 

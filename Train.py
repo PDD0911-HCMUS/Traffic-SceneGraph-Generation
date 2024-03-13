@@ -11,7 +11,7 @@ import numpy as np
 import random
 import json
 
-from torch.utils.tensorboard import SummaryWriter
+#from torch.utils.tensorboard import SummaryWriter
 
 if __name__ == '__main__':
     seed = 42 + get_rank()
@@ -36,7 +36,6 @@ if __name__ == '__main__':
     print('Device is being used: ', device)
     model, criterion = build(device = device)
     model.to(device)
-    writer = SummaryWriter()
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('number of params:', n_parameters)

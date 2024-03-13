@@ -53,9 +53,10 @@ class HungarianMatcher(nn.Module):
             For each batch element, it holds:
                 len(index_i) = len(index_j) = min(num_queries, num_target_boxes)
         """
-        sub_matcher = self.forward_sub(outputs, targets) 
-        object_matcher = self.forward_obj(outputs, targets) 
-        return sub_matcher, object_matcher
+        sub_matcher, _, _, _ = self.forward_sub(outputs, targets) 
+        object_matcher, _, _, _ = self.forward_obj(outputs, targets) 
+        rel_matcher = self.forward_rel(outputs, targets)
+        return sub_matcher, object_matcher, rel_matcher
 
     def forward_sub(self, outputs, targets):
         bs_sub, num_queries_sub = outputs["pred_sub_logits"].shape[:2]
@@ -90,7 +91,7 @@ class HungarianMatcher(nn.Module):
         sizes_sub = [len(v["subBbox"]) for v in targets]
         indices_sub = [linear_sum_assignment(c[i]) for i, c in enumerate(C_sub.split(sizes_sub, -1))]
 
-        return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices_sub]
+        return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices_sub], cost_bbox_sub, cost_class_sub, cost_giou_sub
     
     def forward_obj(self, outputs, targets):
         bs_obj, num_queries_obj = outputs["pred_obj_logits"].shape[:2]
@@ -127,7 +128,26 @@ class HungarianMatcher(nn.Module):
         sizes_obj = [len(v["objBbox"]) for v in targets]
         indices_obj = [linear_sum_assignment(c[i]) for i, c in enumerate(C_obj.split(sizes_obj, -1))]
 
-        return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices_obj]
+        return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices_obj], cost_bbox_obj, cost_class_obj, cost_giou_obj
+    
+    def forward_rel(self,outputs, targets):
+        _ , cost_bbox_sub, cost_class_sub, cost_giou_sub = self.forward_sub(outputs, targets)
+        _ , cost_bbox_obj, cost_class_obj, cost_giou_obj = self.forward_obj(outputs, targets)
+        
+        bs_rel, num_queries = outputs["pred_sub_logits"].shape[:2]
+        num_queries_rel = outputs["pred_rel"].shape[1]
+        out_prob_rel = outputs["pred_rel"].flatten(0, 1).softmax(-1)  # [batch_size * num_queries, num_classes]
+        tgt_ids_rel = torch.cat([v["rel"] for v in targets])
+        cost_class_rel = -out_prob_rel[:, tgt_ids_rel]
+
+        C_rel = self.cost_bbox * cost_bbox_sub + self.cost_bbox * cost_bbox_obj  + \
+                self.cost_class * cost_class_sub + self.cost_class * cost_class_obj + 0.5 * cost_class_rel + \
+                self.cost_giou * cost_giou_sub + self.cost_giou * cost_giou_obj
+        C_rel = C_rel.view(bs_rel, num_queries_rel, -1).cpu()
+        
+        sizes_rel = [len(v["rel"]) for v in targets]
+        indices_rel = [linear_sum_assignment(c[i]) for i, c in enumerate(C_rel.split(sizes_rel, -1))]
+        return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices_rel]
 
 def build_matcher():
     return HungarianMatcher(

@@ -1,0 +1,12 @@
+cartopy==0.22.0
+efficientnet_pytorch==0.7.1
+matplotlib==3.8.2
+mayavi==4.8.1
+networkx==3.0
+numpy==1.26.4
+packaging==24.0
+Pillow==10.2.0
+pycocotools==2.0.7
+scipy==1.12.0
+seaborn==0.13.2
+tqdm==4.66.2
