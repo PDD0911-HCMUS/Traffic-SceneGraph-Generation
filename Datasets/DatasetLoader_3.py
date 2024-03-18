@@ -12,6 +12,7 @@ import Datasets.TransformUtils as T
 # import Util as ults
 # import TransformUtils as T
 from pycocotools import mask as coco_mask
+from tqdm import tqdm
 
 vgRoot = 'Datasets/VisualGenome/'
 
@@ -29,7 +30,8 @@ def make_coco_transforms(image_set):
         T.NormalizeSO([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
 
-    scales = [480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800]
+    #scales = [480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800]
+    scales = [480, 512]
 
     if image_set == 'train':
         return T.Compose([
@@ -37,15 +39,18 @@ def make_coco_transforms(image_set):
             T.RandomSelect(
                 T.RandomResizeSO(scales, max_size=1333),
                 T.Compose([
-                    T.RandomResizeSO([400, 500, 600]),
-                    T.RandomResizeSO(scales, max_size=1333),
+                    #T.RandomResizeSO([400, 500, 600]),
+                    #T.RandomResizeSO(scales, max_size=1333),
+                    T.RandomResizeSO([400, 500]),
+                    T.RandomResizeSO(scales, max_size=512)
                 ])
             ),
             normalize])
 
     if image_set == 'val':
         return T.Compose([
-            T.RandomResizeSO([800], max_size=1333),
+            # T.RandomResizeSO([800], max_size=1333),
+            T.RandomResizeSO([512], max_size=512),
             normalize,
         ])
 
@@ -75,7 +80,23 @@ class DatasetLoader(Dataset):
         for item in target.keys():
             target[item] = torch.as_tensor(target[item])
 
-        image, target = self.transform(image, target)
+        _, unique_indices_sub = target['subBbox'].unique(dim=0, return_inverse=True)
+        unique_subBbox = target['subBbox'][unique_indices_sub]
+        unique_sub = target['sub'][unique_indices_sub]
+
+        _, unique_indices_obj = target['objBbox'].unique(dim=0, return_inverse=True)
+        unique_objBbox = target['objBbox'][unique_indices_obj]
+        unique_obj = target['obj'][unique_indices_obj]
+
+        target_main = {
+            'subBbox': unique_subBbox,
+            'objBbox': unique_objBbox,
+            'sub': unique_sub,
+            'obj': unique_obj,
+            'image_id': target['image_id'],
+            'orig_size': target['orig_size']
+        }
+        image, target = self.transform(image, target_main)
 
         return image, target
 
@@ -97,20 +118,18 @@ def BuildDataset(mode):
     datasetLoader = None
     if(mode == 'train'):
         imgDir = vgRoot + vgImageTrain
-        annDir = vgRoot + vgAnnoTrain
         dataList = GetAllData(imageDir=imgDir)
 
-        dataset = DatasetLoader(dataList, transform=make_coco_transforms(image_set=mode), mode=mode)
+        dataset = DatasetLoader(dataList[:30000], transform=make_coco_transforms(image_set=mode), mode=mode)
         sampler_train = torch.utils.data.RandomSampler(dataset)
         batch_sampler_train = torch.utils.data.BatchSampler(sampler_train, batch, drop_last=True)
         datasetLoader = DataLoader(dataset, batch_sampler=batch_sampler_train, collate_fn=ults.collate_fn)
 
     elif(mode == 'val'):
         imgDir = vgRoot + vgImageVal
-        annDir = vgRoot + vgAnnoVal
-        dataList = GetAllData(imageDir=imgDir, annoDir=annDir)
+        dataList = GetAllData(imageDir=imgDir)
         
-        dataset = DatasetLoader(dataList, transform=make_coco_transforms(image_set=mode), mode=mode)
+        dataset = DatasetLoader(dataList[:5000], transform=make_coco_transforms(image_set=mode), mode=mode)
         sampler_val = torch.utils.data.SequentialSampler(dataset)
         datasetLoader = DataLoader(dataset, batch_size=batch, sampler=sampler_val, drop_last=False, collate_fn=ults.collate_fn)
 
@@ -166,14 +185,22 @@ class ConvertCocoPolysToMask(object):
 # if __name__=='__main__':
 
 #     trainDataLoader = BuildDataset(mode='train')
-#     validDataLoader = BuildDataset(mode='valid')
-#     dataloaderDict = {
-#         "train": trainDataLoader,
-#         "val": validDataLoader
-#     }
-#     batchIter = iter(dataloaderDict['train'])
-#     inputs, target = next(batchIter)
-#     print(len(target))
-#     print(target[0])
-#     imshow(inputs.tensors[0])
-#     plt.show()
+#     validDataLoader = BuildDataset(mode='val')
+#     # dataloaderDict = {
+#     #     "train": trainDataLoader,
+#     #     "val": validDataLoader
+#     # }
+#     # batchIter = iter(dataloaderDict['train'])
+#     # inputs, target = next(batchIter)
+#     # print(len(target))
+#     # print(target[0])
+#     # imshow(inputs.tensors[0])
+#     # plt.show()
+#     t = 0
+#     for images, targets in tqdm(trainDataLoader):
+#         # out=model(images)
+#         # # print('source size: ', src.size())
+#         # # print('mask size: ',mask.size())
+#         # # print(cp.size())
+#         # # print(hs.size())
+#         t = t + 1

@@ -27,7 +27,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     metric_logger.add_meter('loss_bbox_sub', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
     metric_logger.add_meter('loss_bbox_obj', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
     header = 'Epoch: [{}]'.format(epoch)
-    print_freq = 100
+    print_freq = 500
 
     for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
         samples = samples.to(device)
@@ -84,7 +84,7 @@ def evaluate(model, criterion, data_loader, device):
     header = 'Test:'
     # coco_evaluator.coco_eval[iou_types[0]].params.iouThrs = [0, 0.1, 0.5, 0.75]
 
-    for samples, targets in metric_logger.log_every(data_loader, 100, header):
+    for samples, targets in metric_logger.log_every(data_loader, 500, header):
         samples = samples.to(device)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 

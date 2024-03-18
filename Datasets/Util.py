@@ -41,7 +41,6 @@ def interpolate(input, size=None, scale_factor=None, mode="nearest", align_corne
     else:
         return torchvision.ops.misc.interpolate(input, size, scale_factor, mode, align_corners)
 
-
 class NestedTensor(object):
     def __init__(self, tensors, mask: Optional[Tensor]):
         self.tensors = tensors
@@ -425,6 +424,11 @@ class MetricLogger(object):
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
         print('{} Total time: {} ({:.4f} s / it)'.format(
             header, total_time_str, total_time / len(iterable)))
+        
+def save_on_master(*args, **kwargs):
+    if is_main_process():
+        torch.save(*args, **kwargs)
+        
 # if __name__ == '__main__':
 #     x = torch.randn(3,200,300)
 #     y = torch.randn(3,200,200)
