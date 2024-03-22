@@ -49,25 +49,28 @@ class Transformer(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def forward(self, src, mask, cp_embed, att_embed, pos_embed):
+    def forward(self, src, mask, query_embed, pos_embed):
         # flatten NxCxHxW to HWxNxC
         bs, c, h, w = src.shape
         src = src.flatten(2).permute(2, 0, 1)
         pos_embed = pos_embed.flatten(2).permute(2, 0, 1)
 
-        cp_embed = cp_embed.unsqueeze(1).repeat(1, bs, 1)
-        att_embed = att_embed.unsqueeze(1).repeat(1, bs, 1)
+        query_embed = query_embed.unsqueeze(1).repeat(1, bs, 1)
         mask = mask.flatten(1)
-
-        cp_entities = torch.zeros_like(cp_embed)
-        att_entity = torch.zeros_like(att_embed)
+        # cp_tgt = torch.zeros_like(query_embed)
+        '''
+        Note: 
+        Because we use torch.zeros -> cp_tgt will be on CPU
+        '''
+        cp_tgt = torch.zeros(query_embed.size(0), query_embed.size(1), query_embed.size(2)*2).to(query_embed.device)
 
         memory = self.encoder(src, src_key_padding_mask=mask, pos=pos_embed)
-        hs, hs_map = self.decoder(cp_entities, att_entity, memory, memory_key_padding_mask=mask,
-                          pos=pos_embed, cp_pos=cp_embed, att_pos = att_embed)
-        return  hs.transpose(1, 2),\
-                hs_map.reshape(hs_map.shape[0], bs, hs_map.shape[2], 1, h, w),\
-                memory.permute(1, 2, 0).view(bs, c, h, w)
+
+        # hs_rel, hs_sub, hs_obj = self.decoder(sub_entity, obj_entity, memory, memory_key_padding_mask=mask,
+        #                   pos=pos_embed, sub_pos=sub_embed, obj_pos = obj_embed)
+        hs= self.decoder(cp_tgt, memory, memory_key_padding_mask=mask,
+                          pos=pos_embed, query_pos=query_embed)
+        return  hs.transpose(1, 2), memory.permute(1, 2, 0).view(bs, c, h, w)
 
 
 class TransformerEncoder(nn.Module):
@@ -103,38 +106,29 @@ class TransformerDecoder(nn.Module):
         self.norm = norm
         self.return_intermediate = return_intermediate
 
-    def forward(self, cp_entities, att_entity, memory,
+    def forward(self, cp_tgt, memory,
                 tgt_mask: Optional[Tensor] = None,
                 memory_mask: Optional[Tensor] = None,
                 tgt_key_padding_mask: Optional[Tensor] = None,
                 memory_key_padding_mask: Optional[Tensor] = None,
                 pos: Optional[Tensor] = None,
-                cp_pos: Optional[Tensor] = None,
-                att_pos: Optional[Tensor] = None):
+                query_pos: Optional[Tensor] = None):
         
-        output_cp = cp_entities
-        ouput_att = att_entity
+        output = cp_tgt
 
-        intermediate_cp = []
-        intermediate_fmap = []
+        intermediate = []
 
 
         for layer in self.layers:
-            output, cp_maps = layer(output_cp, ouput_att, cp_pos, att_pos, 
-                                                  memory, tgt_mask=tgt_mask, memory_mask=memory_mask,
-                                                  tgt_key_padding_mask=tgt_key_padding_mask,
-                                                  memory_key_padding_mask=memory_key_padding_mask, pos=pos)
+            output = layer(output, memory, tgt_mask=tgt_mask, memory_mask=memory_mask,
+                            tgt_key_padding_mask=tgt_key_padding_mask,
+                            memory_key_padding_mask=memory_key_padding_mask, pos=pos, query_pos=query_pos)
             if self.return_intermediate:
-                intermediate_cp.append(output)
-                intermediate_fmap.append(cp_maps)
+                intermediate.append(output)
 
 
         if self.return_intermediate:
-            return torch.stack(intermediate_cp),torch.stack(intermediate_fmap)
-
-        #return output.unsqueeze(0)
-
-
+            return torch.stack(intermediate)
 class TransformerEncoderLayer(nn.Module):
 
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1,
@@ -182,80 +176,86 @@ class TransformerDecoderLayer(nn.Module):
         self.activation = _get_activation_fn(activation)
 
         '''Couple object section'''
-        self.self_attn_cp = nn.MultiheadAttention(d_model, nhead, dropout=dropout) # self-attention
-        self.multihead_attn_cp = nn.MultiheadAttention(d_model, nhead, dropout=dropout) # cross attention with output encoder
+        self.self_attn_sub = nn.MultiheadAttention(d_model, nhead, dropout=dropout) # self-attention
+        self.multihead_attn_sub = nn.MultiheadAttention(d_model, nhead, dropout=dropout) # cross attention with output encoder
         # Implementation of Feedforward model
-        self.linear1_cp = nn.Linear(d_model, dim_feedforward)
-        self.dropout_cp = nn.Dropout(dropout)
-        self.linear2_cp = nn.Linear(dim_feedforward, d_model)
+        self.linear1_sub = nn.Linear(d_model, dim_feedforward)
+        self.dropout_sub = nn.Dropout(dropout)
+        self.linear2_sub = nn.Linear(dim_feedforward, d_model)
 
-        self.norm1_cp = nn.LayerNorm(d_model)
-        self.norm2_cp = nn.LayerNorm(d_model)
-        self.norm3_cp = nn.LayerNorm(d_model)
-        self.dropout1_cp = nn.Dropout(dropout)
-        self.dropout2_cp = nn.Dropout(dropout)
-        self.dropout3_cp = nn.Dropout(dropout)
+        self.norm1_sub = nn.LayerNorm(d_model)
+        self.norm2_sub = nn.LayerNorm(d_model)
+        self.norm3_sub = nn.LayerNorm(d_model)
+        self.dropout1_sub = nn.Dropout(dropout)
+        self.dropout2_sub = nn.Dropout(dropout)
+        self.dropout3_sub = nn.Dropout(dropout)
 
-        '''Attribuite object section (To expand information about graph)'''
-        self.self_attn_att = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
-        self.multihead_attn_att = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+        self.self_attn_obj = nn.MultiheadAttention(d_model, nhead, dropout=dropout) # self-attention
+        self.multihead_attn_obj = nn.MultiheadAttention(d_model, nhead, dropout=dropout) # cross attention with output encoder
         # Implementation of Feedforward model
-        self.linear1_att = nn.Linear(d_model, dim_feedforward)
-        self.dropout_att = nn.Dropout(dropout)
-        self.linear2_att = nn.Linear(dim_feedforward, d_model)
+        self.linear1_obj = nn.Linear(d_model, dim_feedforward)
+        self.dropout_obj = nn.Dropout(dropout)
+        self.linear2_obj = nn.Linear(dim_feedforward, d_model)
 
-        self.norm1_att = nn.LayerNorm(d_model)
-        self.norm2_att = nn.LayerNorm(d_model)
-        self.norm3_att = nn.LayerNorm(d_model)
-        self.dropout1_att = nn.Dropout(dropout)
-        self.dropout2_att = nn.Dropout(dropout)
-        self.dropout3_att = nn.Dropout(dropout)
+        self.norm1_obj = nn.LayerNorm(d_model)
+        self.norm2_obj = nn.LayerNorm(d_model)
+        self.norm3_obj = nn.LayerNorm(d_model)
+        self.dropout1_obj = nn.Dropout(dropout)
+        self.dropout2_obj = nn.Dropout(dropout)
+        self.dropout3_obj = nn.Dropout(dropout)
 
     def with_pos_embed(self, tensor, pos: Optional[Tensor]):
         return tensor if pos is None else tensor + pos
 
-    def forward(self, tgt_cp, tgt_att, query_pos_cp, query_pos_att,
+    def forward(self, tgt_cp,
                 memory, tgt_mask: Optional[Tensor] = None, 
                 memory_mask: Optional[Tensor] = None,
                 tgt_key_padding_mask: Optional[Tensor] = None,
                 memory_key_padding_mask: Optional[Tensor] = None, 
-                pos: Optional[Tensor] = None):
+                pos: Optional[Tensor] = None,
+                query_pos: Optional[Tensor] = None):
         
-        '''Couple object layer'''
-        q_cp = k_cp = self.with_pos_embed(tgt_cp, query_pos_cp)
-        tgt2_cp = self.self_attn_cp(q_cp, k_cp, value=tgt_cp, attn_mask=tgt_mask,
+        h_dim = query_pos.shape[2]
+        tgt_sub, tgt_obj = torch.split(tgt_cp, h_dim, dim=-1)
+        '''Couple Entities Detection'''
+        q_sub = k_sub = self.with_pos_embed(tgt_sub, query_pos)
+        tgt2_sub = self.self_attn_sub(q_sub, k_sub, value=tgt_sub, attn_mask=tgt_mask,
                               key_padding_mask=tgt_key_padding_mask)[0]
-        tgt_cp = tgt_cp + self.dropout1_cp(tgt2_cp)
-        tgt_cp = self.norm1_cp(tgt_cp)
-        tgt2_cp, cp_maps = self.multihead_attn_cp(query=self.with_pos_embed(tgt_cp, query_pos_cp),
-                                   key=self.with_pos_embed(memory, pos),
-                                   value=memory, attn_mask=memory_mask,
-                                   key_padding_mask=memory_key_padding_mask)
-        tgt_cp = tgt_cp + self.dropout2_cp(tgt2_cp)
-        tgt_cp = self.norm2_cp(tgt_cp)
-        tgt2_cp = self.linear2_cp(self.dropout_cp(self.activation(self.linear1_cp(tgt_cp))))
-        tgt_cp = tgt_cp + self.dropout3_cp(tgt2_cp)
-        tgt_cp = self.norm3_cp(tgt_cp)
-
-        '''Attribute object layer'''
-        q_att = k_att = self.with_pos_embed(tgt_att, query_pos_att)
-        tgt2_att = self.self_attn_att(q_att, k_att, value=tgt_att, attn_mask=tgt_mask,
-                              key_padding_mask=tgt_key_padding_mask)[0]
-        tgt_att = tgt_att + self.dropout1_att(tgt2_att)
-        tgt_att = self.norm1_att(tgt_att)
-        tgt2_att = self.multihead_attn_att(query=self.with_pos_embed(tgt_att, query_pos_att),
+        tgt_sub = tgt_sub + self.dropout1_sub(tgt2_sub)
+        tgt_sub = self.norm1_sub(tgt_sub)
+        
+        tgt2_sub = self.multihead_attn_sub(query=self.with_pos_embed(tgt_sub, query_pos),
                                    key=self.with_pos_embed(memory, pos),
                                    value=memory, attn_mask=memory_mask,
                                    key_padding_mask=memory_key_padding_mask)[0]
-        tgt_att = tgt_att + self.dropout2_att(tgt2_att)
-        tgt_att = self.norm2_att(tgt_att)
-        tgt2_att = self.linear2_att(self.dropout_att(self.activation(self.linear1_att(tgt_att))))
-        tgt_att = tgt_att + self.dropout3_att(tgt2_att)
-        tgt_att = self.norm3_att(tgt_att)
+        tgt_sub = tgt_sub + self.dropout2_sub(tgt2_sub)
+        tgt_sub = self.norm2_sub(tgt_sub)
+        tgt2_sub = self.linear2_sub(self.dropout_sub(self.activation(self.linear1_sub(tgt_sub))))
+        tgt_sub = tgt_sub + self.dropout3_sub(tgt2_sub)
+        tgt_sub = self.norm3_sub(tgt_sub)
 
-        tgt = tgt_cp + tgt_att
-        return tgt, cp_maps
-        #return tgt_cp, tgt_att, cp_maps
+        
+        q_obj = k_obj = self.with_pos_embed(tgt_sub, query_pos)
+        tgt2_obj = self.self_attn_obj(q_obj, k_obj, value=tgt_obj, attn_mask=tgt_mask,
+                              key_padding_mask=tgt_key_padding_mask)[0]
+        tgt_obj = tgt_obj + self.dropout1_obj(tgt2_obj)
+        tgt_obj = self.norm1_obj(tgt_obj)
+        tgt2_obj = self.multihead_attn_obj(query=self.with_pos_embed(tgt_obj, query_pos),
+                                   key=self.with_pos_embed(memory, pos),
+                                   value=memory, attn_mask=memory_mask,
+                                   key_padding_mask=memory_key_padding_mask)[0]
+        tgt_obj = tgt_obj + self.dropout2_obj(tgt2_obj)
+        tgt_obj = self.norm2_obj(tgt_obj)
+        tgt2_obj = self.linear2_obj(self.dropout_obj(self.activation(self.linear1_obj(tgt_obj))))
+        tgt_obj = tgt_obj + self.dropout3_obj(tgt2_obj)
+        tgt_obj = self.norm3_obj(tgt_obj)
+
+        # tgt_rel = tgt_sub + tgt_obj
+        # return tgt, cp_maps
+        tgt_cp = torch.cat((tgt_sub, tgt_obj), dim=-1)
+        return tgt_cp
+        #return tgt_sub, tgt_obj
+        #return tgt_sub, tgt_att, cp_maps
 
 
 def _get_clones(module, N):

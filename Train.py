@@ -1,10 +1,10 @@
 from Datasets.DatasetLoader_3 import BuildDataset, imshow
-from Datasets.Util import nested_tensor_from_tensor_list, get_rank, is_main_process
+from Datasets.Util import nested_tensor_from_tensor_list, get_rank, is_main_process, save_on_master
 import matplotlib.pyplot as plt
-from torch.utils.data import Dataset, DataLoader
 from ModelCreation.ComponentsModel_relt import build
-import torch.optim as optim
 import torch
+torch.cuda.empty_cache()
+from pathlib import Path
 from tqdm import tqdm
 from TrainEngine import train_one_epoch, evaluate
 import numpy as np
@@ -18,24 +18,17 @@ if __name__ == '__main__':
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    lr_drop = 200
-    ouputDir = 'CheckPoint'
-
-    # dataloaderDict = {
-    #     "train": trainDataLoader,
-    #     "val": validDataLoader
-    # }
-
-    # batchIter = iter(dataloaderDict['train'])
-    # inputs, target = next(batchIter)
-    # print(len(target))
-    # print(target[0])
-    # imshow(inputs.tensors[0])
-    # plt.show()
+    device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
+    #device = torch.device('cuda:2')
+    aux_loss = False
+    dec_layers = 6
+    lr_drop = 3
+    ouputDir = Path('CheckPoint')
+    
     print('Device is being used: ', device)
-    model, criterion = build(device = device)
+    model, criterion, postprocessors_sub, postprocessors_obj = build(device = device, aux_loss=aux_loss, dec_layers=dec_layers)
     model.to(device)
+    criterion.to(device)
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('number of params:', n_parameters)
@@ -51,10 +44,10 @@ if __name__ == '__main__':
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, lr_drop)
 
     trainDataLoader = BuildDataset(mode='train')
-    validDataLoader = BuildDataset(mode='valid')
+    validDataLoader = BuildDataset(mode='val')
 
     print("Start training")
-    for epoch in range(0,300):
+    for epoch in range(0,50):
         train_stats = train_one_epoch(
             model, criterion, trainDataLoader, optimizer, device, epoch,
             0.1)
@@ -62,6 +55,14 @@ if __name__ == '__main__':
         checkpoint_paths = [ouputDir / 'checkpoint.pth']
         if (epoch + 1) % lr_drop == 0 or (epoch + 1) % 100 == 0:
             checkpoint_paths.append(ouputDir / f'checkpoint{epoch:04}.pth')
+
+            for checkpoint_path in checkpoint_paths:
+                save_on_master({
+                    'model': model_without_ddp.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                    'lr_scheduler': lr_scheduler.state_dict(),
+                    'epoch': epoch,
+                }, checkpoint_path)
 
         ###
         # TODO: make evaluation in here
@@ -72,12 +73,28 @@ if __name__ == '__main__':
                      'epoch': epoch,
                      'n_parameters': n_parameters}
         
-        if ouputDir and is_main_process():
+        torch.save(model.state_dict(), ouputDir / f'eval/{epoch:03}.pth')
+        if (epoch + 1) % 2 == 0:
             with (ouputDir / "log.txt").open("a") as f:
                 f.write(json.dumps(log_stats) + "\n")
+            torch.save(model.state_dict(), ouputDir / f'eval/{epoch:03}.pth')
 
+    torch.save(model.state_dict(), ouputDir / f'eval/{epoch:03}.pth')
 
+    # dataloaderDict = {
+    #     "train": trainDataLoader,
+    #     "val": validDataLoader
+    # }
+    # batchIter = iter(dataloaderDict['train'])
+    # inputs, target = next(batchIter)
+    # print(len(target))
+    # print(target[0])
+    # imshow(inputs.tensors[0])
+    # plt.show()
+    # model.train()
     # for images, targets in tqdm(trainDataLoader):
+    #     images = images.to(device)
+    #     targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
     #     out=model(images)
     #     # print('source size: ', src.size())
     #     # print('mask size: ',mask.size())
@@ -88,8 +105,6 @@ if __name__ == '__main__':
     #     print('pred_obj_logits: ', out['pred_obj_logits'].size())
     #     print('pred_boxes_sub: ', out['pred_boxes_sub'].size())
     #     print('pred_boxes_obj: ', out['pred_boxes_obj'].size())
-    #     writer.add_graph(model, images)
-    #     writer.close()
     #     # print('pred_rel: ', out['pred_rel'].size())
     #     # sizes = [len(v["subBbox"]) for v in targets]
     #     # print(sizes)
