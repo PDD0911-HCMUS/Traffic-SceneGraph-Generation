@@ -83,7 +83,7 @@ class SGG(nn.Module):
         assert mask is not None
 
         hs,_ = self.transformer(self.input_proj(src), mask, self.query_embed.weight, pos[-1])
-        #print('hs.size(): ', hs.size())
+        ##print('hs.size(): ', hs.size())
         hs_sub, hs_obj = torch.split(hs, self.hidden_dim, dim=-1)
         outputs_sub_class = self.class_sub_embed(hs_sub)
         outputs_obj_class = self.class_obj_embed(hs_obj)
@@ -99,7 +99,7 @@ class SGG(nn.Module):
                'pred_boxes_obj': outputs_coord_obj[-1]
             #    'pred_rel': outputs_rel[-1]
                }
-        #print('self.aux_loss: ', self.aux_loss)
+        ##print('self.aux_loss: ', self.aux_loss)
         if self.aux_loss:
             out['aux_outputs'] = self._set_aux_loss(outputs_sub_class, outputs_obj_class, outputs_coord_sub, outputs_coord_obj)
 
@@ -134,7 +134,7 @@ class SetCriterion(nn.Module):
         self.register_buffer('empty_weight_obj', empty_weight_obj)
         # self.register_buffer('empty_weight_rel', empty_weight_rel)
 
-    def loss_labels(self, outputs, targets, indices_sub, indices_obj, num_boxes, log=True):
+    def loss_labels(self, outputs, targets, indices_sub, indices_obj, num_boxes_sub, num_boxes_obj, log=True):
         """Classification loss (NLL)
         targets dicts must contain the key "labels" containing a tensor of dim [nb_target_boxes]
         """
@@ -177,12 +177,9 @@ class SetCriterion(nn.Module):
         #assert 'pred_boxes' in outputs
         idx_sub = self._get_src_permutation_idx(indices_sub)
         idx_obj = self._get_src_permutation_idx(indices_obj)
-        
-        outputs_pred_boxes_sub = outputs['pred_boxes_sub']
-        outputs_pred_boxes_obj = outputs['pred_boxes_obj']
 
-        src_boxes_sub = outputs_pred_boxes_sub[idx_sub]
-        src_boxes_obj = outputs_pred_boxes_obj[idx_obj]
+        src_boxes_sub = outputs['pred_boxes_sub'][idx_sub]
+        src_boxes_obj = outputs['pred_boxes_obj'][idx_obj]
 
         target_boxes_sub = torch.cat([t['subBbox'][i] for t, (_, i) in zip(targets, indices_sub)], dim=0)
         target_boxes_obj = torch.cat([t['objBbox'][i] for t, (_, i) in zip(targets, indices_obj)], dim=0)
@@ -193,8 +190,6 @@ class SetCriterion(nn.Module):
         losses = {}
         losses['loss_bbox_sub'] = loss_bbox_sub.sum() / num_boxes_sub
         losses['loss_bbox_obj'] = loss_bbox_obj.sum() / num_boxes_obj
-        # losses['loss_bbox'] = (loss_bbox_sub.sum() + loss_bbox_obj.sum()) / num_boxes
-        # losses['loss_bbox'] = (loss_bbox_sub.sum() + loss_bbox_obj.sum())
 
         loss_giou_sub = 1 - torch.diag(generalized_box_iou(
             box_cxcywh_to_xyxy(src_boxes_sub),
@@ -206,8 +201,6 @@ class SetCriterion(nn.Module):
         
         losses['loss_giou_sub'] = loss_giou_sub.sum() / num_boxes_sub
         losses['loss_giou_obj'] = loss_giou_obj.sum() / num_boxes_obj
-        # losses['loss_giou'] = (loss_giou_sub.sum() + loss_giou_obj.sum()) / num_boxes
-        # losses['loss_giou'] = losses['loss_giou_sub'] + losses['loss_giou_obj']
 
         return losses
     
@@ -294,14 +287,11 @@ class SetCriterion(nn.Module):
 
         num_boxes_obj = sum(len(t["obj"]) for t in targets)
         num_boxes_obj = torch.as_tensor([num_boxes_obj], dtype=torch.float, device=next(iter(outputs.values())).device)
-
-        if is_dist_avail_and_initialized():
-            torch.distributed.all_reduce(num_boxes_sub)
-            torch.distributed.all_reduce(num_boxes_obj)
         
         num_boxes_sub = torch.clamp(num_boxes_sub / get_world_size(), min=1).item()
         num_boxes_obj = torch.clamp(num_boxes_obj / get_world_size(), min=1).item()
-
+        #print('num_boxes_sub: ', num_boxes_sub)
+        #print('num_boxes_obj: ', num_boxes_obj)
         # Compute all the requested losses
         losses = {}
         for loss in self.losses:

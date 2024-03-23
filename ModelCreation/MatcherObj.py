@@ -44,6 +44,11 @@ class HungarianMatcher(nn.Module):
         tgt_ids_obj = torch.cat([v["obj"] for v in targets])
         tgt_bbox_obj = torch.cat([v["objBbox"] for v in targets])
 
+        #print('out_prob_obj: ', out_prob_obj.size())
+        #print('out_bbox_obj: ', out_bbox_obj.size())
+        #print('tgt_ids_obj: ', tgt_ids_obj.size())
+        #print('tgt_bbox_obj: ', tgt_bbox_obj.size())
+
         # Compute the classification cost. Contrary to the loss, we don't use the NLL,
         # but approximate it in 1 - proba[target class].
         # The 1 is a constant that doesn't change the matching, it can be ommitted.

@@ -1,7 +1,7 @@
 from Datasets.DatasetLoader_3 import BuildDataset, imshow
 from Datasets.Util import nested_tensor_from_tensor_list, get_rank, is_main_process, save_on_master
 import matplotlib.pyplot as plt
-from ModelCreation.ComponentsModel_relt import build
+from ModelCreation.SGGModel import build
 import torch
 torch.cuda.empty_cache()
 from pathlib import Path
@@ -10,6 +10,7 @@ from TrainEngine import train_one_epoch, evaluate
 import numpy as np
 import random
 import json
+from ModelCreation.MatcherSub import build_matcher_sub
 
 #from torch.utils.tensorboard import SummaryWriter
 
@@ -91,20 +92,23 @@ if __name__ == '__main__':
     # print(target[0])
     # imshow(inputs.tensors[0])
     # plt.show()
+
+
+    # matcher_sub = build_matcher_sub()
     # model.train()
+    # criterion.train()
     # for images, targets in tqdm(trainDataLoader):
     #     images = images.to(device)
     #     targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
-    #     out=model(images)
-    #     # print('source size: ', src.size())
-    #     # print('mask size: ',mask.size())
-    #     # print(cp.size())
-    #     # print(hs.size())
-        
-    #     print('pred_sub_logits: ', out['pred_sub_logits'].size())
-    #     print('pred_obj_logits: ', out['pred_obj_logits'].size())
-    #     print('pred_boxes_sub: ', out['pred_boxes_sub'].size())
-    #     print('pred_boxes_obj: ', out['pred_boxes_obj'].size())
+    #     outputs=model(images)
+    #     # outputs_without_aux = {k: v for k, v in outputs.items() if k != 'aux_outputs'}
+    #     # indices_sub = matcher_sub(outputs_without_aux, targets)
+    #     loss_dict = criterion(outputs, targets)
+    #     # print(indices_sub[0])
+    #     # print('pred_sub_logits: ', outputs['pred_sub_logits'].size())
+    #     # print('pred_obj_logits: ', outputs['pred_obj_logits'].size())
+    #     # print('pred_boxes_sub: ', outputs['pred_boxes_sub'].size())
+    #     # print('pred_boxes_obj: ', outputs['pred_boxes_obj'].size())
     #     # print('pred_rel: ', out['pred_rel'].size())
     #     # sizes = [len(v["subBbox"]) for v in targets]
     #     # print(sizes)

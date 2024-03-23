@@ -37,34 +37,42 @@ class HungarianMatcher(nn.Module):
 
         # We flatten to compute the cost matrices in a batch
         out_prob_sub = outputs["pred_sub_logits"].flatten(0, 1).softmax(-1)  # [batch_size * num_queries, num_classes]
+        out_bbox_sub = outputs["pred_boxes_sub"].flatten(0, 1)  # [batch_size * num_queries, 4]
 
         #out_bbox = outputs["pred_boxes"].flatten(0, 1)  # [batch_size * num_queries, 4]
 
         # Also concat the target labels and boxes
         tgt_ids_sub = torch.cat([v["sub"] for v in targets])
         tgt_bbox_sub = torch.cat([v["subBbox"] for v in targets])
-
+        
+        #print('out_prob_sub: ', out_prob_sub.size())
+        #print('out_bbox_sub: ', out_bbox_sub.size())
+        #print('tgt_ids_sub: ', tgt_ids_sub.size())
+        #print('tgt_bbox_sub: ', tgt_bbox_sub.size())
+        
+        
         # Compute the classification cost. Contrary to the loss, we don't use the NLL,
         # but approximate it in 1 - proba[target class].
         # The 1 is a constant that doesn't change the matching, it can be ommitted.
         cost_class_sub = -out_prob_sub[:, tgt_ids_sub]
 
         # Compute the L1 cost between boxes
-        out_bbox_sub = outputs["pred_boxes_sub"].flatten(0, 1)  # [batch_size * num_queries, 4]
         cost_bbox_sub = torch.cdist(out_bbox_sub, tgt_bbox_sub, p=1)
 
         # Compute the giou cost betwen boxes
         cost_giou_sub = -generalized_box_iou(box_cxcywh_to_xyxy(out_bbox_sub), box_cxcywh_to_xyxy(tgt_bbox_sub))
 
+        #print('cost_class_sub: ', cost_class_sub.size())
+        #print('cost_bbox_sub: ', cost_bbox_sub.size())
+
         # Final cost matrix
-        C_sub = self.cost_bbox * cost_bbox_sub + \
-            self.cost_class * cost_class_sub + \
-            self.cost_giou * cost_giou_sub 
+        C_sub = self.cost_bbox * cost_bbox_sub + self.cost_class * cost_class_sub + self.cost_giou * cost_giou_sub 
         C_sub = C_sub.view(bs_sub, num_queries_sub, -1).cpu()
-
+        #print('C_sub: ', C_sub.size())
         sizes_sub = [len(v["subBbox"]) for v in targets]
+        #print('sizes_sub: ', sizes_sub)
         indices_sub = [linear_sum_assignment(c[i]) for i, c in enumerate(C_sub.split(sizes_sub, -1))]
-
+        #print(indices_sub)
         return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices_sub]
     
 def build_matcher_sub():

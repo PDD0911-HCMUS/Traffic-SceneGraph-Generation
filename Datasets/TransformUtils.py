@@ -365,15 +365,15 @@ class NormalizeSO(object):
         h, w = image.shape[-2:]
         if "subBbox" in target:
             boxes_sub = target["subBbox"]
-            boxes_sub = box_cxcywh_to_xyxy(boxes_sub)
-            boxes_sub = box_xyxy_to_cxcywh(boxes_sub)
+            #boxes_sub = box_cxcywh_to_xyxy(boxes_sub)
+            #boxes_sub = box_xyxy_to_cxcywh(boxes_sub)
             boxes_sub = boxes_sub / torch.tensor([w, h, w, h], dtype=torch.float32)
             target["subBbox"] = boxes_sub
 
         if "objBbox" in target:
             boxes_obj = target["objBbox"]
-            boxes_obj = box_cxcywh_to_xyxy(boxes_obj)
-            boxes_obj = box_xyxy_to_cxcywh(boxes_obj)
+            #boxes_obj = box_cxcywh_to_xyxy(boxes_obj)
+            #boxes_obj = box_xyxy_to_cxcywh(boxes_obj)
             boxes_obj = boxes_obj / torch.tensor([w, h, w, h], dtype=torch.float32)
             target["objBbox"] = boxes_obj
         return image, target
