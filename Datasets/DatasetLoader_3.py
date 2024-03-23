@@ -1,141 +1,61 @@
+# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Institute of Information Processing, Leibniz University Hannover.
+
+"""
+dataset (COCO-like) which returns image_id for evaluation.
+
+Mostly copy-paste from https://github.com/pytorch/vision/blob/13b35ff/references/detection/coco_utils.py
+"""
 import os
+import sys
+get_pwd = os.getcwd()
+sys.path.insert(0, get_pwd)
+from pathlib import Path
 import json
-from typing import Any
-from PIL import Image
-from torchvision import transforms
-from torch.utils.data import Dataset, DataLoader
-import matplotlib.pyplot as plt
-import numpy as np
 import torch
-import Datasets.Util as ults
-import Datasets.TransformUtils as T
-# import Util as ults
-# import TransformUtils as T
+import torch.utils.data
+import torchvision
 from pycocotools import mask as coco_mask
-from tqdm import tqdm
 
-vgRoot = 'Datasets/VisualGenome/'
+import TransformUtils as T
 
-vgImageTrain = 'Train/image'
-vgAnnoTrain = 'Train/target'
+import numpy as np
+import matplotlib.pyplot as plt
 
-vgImageVal = 'Val/image'
-vgAnnoVal = 'Val/target'
-batch = 2
+class CocoDetection(torchvision.datasets.CocoDetection):
+    def __init__(self, img_folder, ann_file, transforms, return_masks):
+        super(CocoDetection, self).__init__(img_folder, ann_file)
+        self._transforms = transforms
+        self.prepare = ConvertCocoPolysToMask(return_masks)
 
-def make_coco_transforms(image_set):
+    def __getitem__(self, idx):
+        img, target = super(CocoDetection, self).__getitem__(idx)
+        image_id = self.ids[idx]
 
-    normalize = T.Compose([
-        T.ToTensor(),
-        T.NormalizeSO([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-    ])
+        target = {'image_id': image_id, 'annotations': target}
 
-    #scales = [480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800]
-    scales = [480, 512]
+        img, target = self.prepare(img, target)
+        if self._transforms is not None:
+            img, target = self._transforms(img, target)
+        return img, target
 
-    if image_set == 'train':
-        return T.Compose([
-            T.RandomHorizontalFlipSO(),
-            T.RandomSelect(
-                T.RandomResizeSO(scales, max_size=1333),
-                T.Compose([
-                    #T.RandomResizeSO([400, 500, 600]),
-                    #T.RandomResizeSO(scales, max_size=1333),
-                    T.RandomResizeSO([400, 500]),
-                    T.RandomResizeSO(scales, max_size=512)
-                ])
-            ),
-            normalize])
 
-    if image_set == 'val':
-        return T.Compose([
-            # T.RandomResizeSO([800], max_size=1333),
-            T.RandomResizeSO([512], max_size=512),
-            normalize,
-        ])
+def convert_coco_poly_to_mask(segmentations, height, width):
+    masks = []
+    for polygons in segmentations:
+        rles = coco_mask.frPyObjects(polygons, height, width)
+        mask = coco_mask.decode(rles)
+        if len(mask.shape) < 3:
+            mask = mask[..., None]
+        mask = torch.as_tensor(mask, dtype=torch.uint8)
+        mask = mask.any(dim=2)
+        masks.append(mask)
+    if masks:
+        masks = torch.stack(masks, dim=0)
+    else:
+        masks = torch.zeros((0, height, width), dtype=torch.uint8)
+    return masks
 
-    raise ValueError(f'unknown {image_set}')
-
-class DatasetLoader(Dataset):
-    def __init__(self, imageList, transform = None, mode = 'train'):
-        self.imageList = imageList
-        self.transform = transform
-        self.mode = mode
-    
-    def __len__(self):
-        return len(self.imageList)
-    
-    def __getitem__(self, index):
-        imagePath = self.imageList[index]
-        # print(imagePath)
-        
-        if(self.mode == 'train'):
-            target = open(os.path.join(imagePath.replace(vgImageTrain, vgAnnoTrain).replace('.jpg', '.json')))
-            target = json.load(target)
-        if(self.mode == 'val'):
-            target = open(os.path.join(imagePath.replace(vgImageVal, vgAnnoVal).replace('.jpg', '.json')))
-            target = json.load(target)
-            
-        image = Image.open(imagePath)
-        for item in target.keys():
-            target[item] = torch.as_tensor(target[item])
-
-        _, unique_indices = target['subBbox'].unique(dim=0, return_inverse=True)
-        unique_subBbox = target['subBbox'][unique_indices]
-        unique_sub = target['sub'][unique_indices]
-
-        _, unique_indices = target['objBbox'].unique(dim=0, return_inverse=True)
-        unique_objBbox = target['objBbox'][unique_indices]
-        unique_obj = target['obj'][unique_indices]
-
-        target_main = {
-            'subBbox': unique_subBbox,
-            'objBbox': unique_objBbox,
-            'sub': unique_sub,
-            'obj': unique_obj,
-            'image_id': target['image_id'],
-            'orig_size': target['orig_size']
-        }
-        image, target = self.transform(image, target_main)
-
-        #image, target = self.transform(image, target)
-
-        return image, target
-
-def imshow(img):
-    img = img.numpy().transpose((1, 2, 0))  # chuyển từ tensor sang numpy
-    img = np.clip(img, 0,1)
-    plt.imshow(img)
-    plt.axis('off')  # không hiển thị trục
-
-def GetAllData(imageDir):
-    imageList = []
-    for item in os.listdir(imageDir):
-        #imageList.append(os.path.join(vgRoot + vgImg, item))
-        imageList.append(imageDir + '/' + item)
-    return imageList
-
-def BuildDataset(mode):
-    dataset = None
-    datasetLoader = None
-    if(mode == 'train'):
-        imgDir = vgRoot + vgImageTrain
-        dataList = GetAllData(imageDir=imgDir)
-
-        dataset = DatasetLoader(dataList[:8000], transform=make_coco_transforms(image_set=mode), mode=mode)
-        sampler_train = torch.utils.data.RandomSampler(dataset)
-        batch_sampler_train = torch.utils.data.BatchSampler(sampler_train, batch, drop_last=True)
-        datasetLoader = DataLoader(dataset, batch_sampler=batch_sampler_train, collate_fn=ults.collate_fn)
-
-    elif(mode == 'val'):
-        imgDir = vgRoot + vgImageVal
-        dataList = GetAllData(imageDir=imgDir)
-        
-        dataset = DatasetLoader(dataList[:2000], transform=make_coco_transforms(image_set=mode), mode=mode)
-        sampler_val = torch.utils.data.SequentialSampler(dataset)
-        datasetLoader = DataLoader(dataset, batch_size=batch, sampler=sampler_val, drop_last=False, collate_fn=ults.collate_fn)
-
-    return datasetLoader
 
 class ConvertCocoPolysToMask(object):
     def __init__(self, return_masks=False):
@@ -147,36 +67,54 @@ class ConvertCocoPolysToMask(object):
         image_id = target["image_id"]
         image_id = torch.tensor([image_id])
 
-        anno = target
+        anno = target["annotations"]
 
-        boxes_sub = anno["subBbox"] 
-        boxes_obj = anno["objBbox"]
+        anno = [obj for obj in anno if 'iscrowd' not in obj or obj['iscrowd'] == 0]
+
+        boxes = [obj["bbox"] for obj in anno]
         # guard against no boxes via resizing
-        boxes_sub = torch.as_tensor(boxes_sub, dtype=torch.float32).reshape(-1, 4)
-        boxes_sub[:, 2:] += boxes_sub[:, :2]
-        boxes_sub[:, 0::2].clamp_(min=0, max=w)
-        boxes_sub[:, 1::2].clamp_(min=0, max=h)
+        boxes = torch.as_tensor(boxes, dtype=torch.float32).reshape(-1, 4)
+        boxes[:, 2:] += boxes[:, :2]
+        boxes[:, 0::2].clamp_(min=0, max=w)
+        boxes[:, 1::2].clamp_(min=0, max=h)
 
-        boxes_obj = torch.as_tensor(boxes_obj, dtype=torch.float32).reshape(-1, 4)
-        boxes_obj[:, 2:] += boxes_obj[:, :2]
-        boxes_obj[:, 0::2].clamp_(min=0, max=w)
-        boxes_obj[:, 1::2].clamp_(min=0, max=h)
+        classes = [obj["category_id"] for obj in anno]
+        classes = torch.tensor(classes, dtype=torch.int64)
 
-        classes_sub = anno["sub"]
-        classes_sub = torch.tensor(classes_sub, dtype=torch.int64)
+        if self.return_masks:
+            segmentations = [obj["segmentation"] for obj in anno]
+            masks = convert_coco_poly_to_mask(segmentations, h, w)
 
-        classes_obj = anno["obj"]
-        classes_obj = torch.tensor(classes_obj, dtype=torch.int64)
+        keypoints = None
+        if anno and "keypoints" in anno[0]:
+            keypoints = [obj["keypoints"] for obj in anno]
+            keypoints = torch.as_tensor(keypoints, dtype=torch.float32)
+            num_keypoints = keypoints.shape[0]
+            if num_keypoints:
+                keypoints = keypoints.view(num_keypoints, -1, 3)
+
+        keep = (boxes[:, 3] > boxes[:, 1]) & (boxes[:, 2] > boxes[:, 0])
+        boxes = boxes[keep]
+        classes = classes[keep]
+        if self.return_masks:
+            masks = masks[keep]
+        if keypoints is not None:
+            keypoints = keypoints[keep]
 
         target = {}
-        target["subBbox"] = boxes_sub
-        target["objBbox"] = boxes_obj
-        target["sub"] = classes_sub
-        target["obj"] = classes_obj
+        target["boxes"] = boxes
+        target["labels"] = classes
+        if self.return_masks:
+            target["masks"] = masks
         target["image_id"] = image_id
-        target["rel"] = anno['rel']
+        if keypoints is not None:
+            target["keypoints"] = keypoints
 
         # for conversion to coco api
+        #area = torch.tensor([obj["area"] for obj in anno])
+        iscrowd = torch.tensor([obj["iscrowd"] if "iscrowd" in obj else 0 for obj in anno])
+        #target["area"] = area[keep]
+        target["iscrowd"] = iscrowd[keep]
 
         target["orig_size"] = torch.as_tensor([int(h), int(w)])
         target["size"] = torch.as_tensor([int(h), int(w)])
@@ -184,25 +122,66 @@ class ConvertCocoPolysToMask(object):
         return image, target
 
 
-# if __name__=='__main__':
+def make_coco_transforms(image_set):
 
-    # trainDataLoader = BuildDataset(mode='train')
-    # validDataLoader = BuildDataset(mode='val')
-    # dataloaderDict = {
-    #     "train": trainDataLoader,
-    #     "val": validDataLoader
-    # }
-    # batchIter = iter(dataloaderDict['train'])
-    # inputs, target = next(batchIter)
-    # print(len(target))
-    # print(target[0])
-    # imshow(inputs.tensors[0])
-    # plt.show()
-    # t = 0
-    # for images, targets in tqdm(trainDataLoader):
-    #     # out=model(images)
-    #     # # print('source size: ', src.size())
-    #     # # print('mask size: ',mask.size())
-    #     # # print(cp.size())
-    #     # # print(hs.size())
-    #     t = t + 1
+    normalize = T.Compose([
+        T.ToTensor(),
+        T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ])
+
+    scales = [480, 512]
+
+    if image_set == 'train':
+        return T.Compose([
+            T.RandomHorizontalFlip(),
+            T.RandomSelect(
+                T.RandomResize(scales, max_size=512),
+                T.Compose([
+                    T.RandomResize([400, 500]),
+                    #T.RandomSizeCrop(384, 600), # TODO: cropping causes that some boxes are dropped then no tensor in the relation part! What should we do?
+                    T.RandomResize(scales, max_size=512),
+                ])
+            ),
+            normalize])
+
+    if image_set == 'val':
+        return T.Compose([
+            T.RandomResize([480], max_size=512),
+            normalize,
+        ])
+
+    raise ValueError(f'unknown {image_set}')
+
+
+def build(image_set, ann_path, img_folder):
+
+    # ann_path = args.ann_path
+    # img_folder = args.img_folder
+
+    if image_set == 'train':
+        ann_file = ann_path + 'train.json'
+    elif image_set == 'val':
+        ann_file = ann_path + 'val.json'
+
+    dataset = CocoDetection(img_folder, ann_file, transforms=make_coco_transforms(image_set), return_masks=False)
+    return dataset
+
+def imshow(img):
+    img = img.numpy().transpose((1, 2, 0))  # chuyển từ tensor sang numpy
+    img = np.clip(img, 0,1)
+    plt.imshow(img)
+    plt.axis('off')
+
+
+# if __name__ == '__main__':
+#     ann_path = 'Datasets/VisualGenome/Annotation/'
+#     img_folder = 'Datasets/VisualGenome/VG_100K/'
+#     trainDataset = build('train', ann_path, img_folder)
+#     print(len(trainDataset))
+#     index = 1000
+#     imageTransform, target = trainDataset.__getitem__(index)
+#     print(imageTransform.shape)
+
+#     imshow(imageTransform)
+#     print(target)
+#     plt.show()
