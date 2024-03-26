@@ -154,8 +154,8 @@ class SetCriterion(nn.Module):
         obj_logits = outputs['obj_logits']
 
         rel_idx = self._get_src_permutation_idx(indices[1])
-        target_rels_classes_o = torch.cat([t["labels"][t["rel_annotations"][J, 0]] for t, (_, J) in zip(targets, indices[1])])
-        target_relo_classes_o = torch.cat([t["labels"][t["rel_annotations"][J, 1]] for t, (_, J) in zip(targets, indices[1])])
+        target_rels_classes_o = torch.cat([t["labels"][J][:len(t['labels'][J]) // 2] for t, (_, J) in zip(targets, indices[1])])
+        target_relo_classes_o = torch.cat([t["labels"][J][len(t['labels'][J]) // 2:] for t, (_, J) in zip(targets, indices[1])])
 
         target_sub_classes = torch.full(sub_logits.shape[:2], self.num_classes, dtype=torch.int64, device=sub_logits.device)
         target_obj_classes = torch.full(obj_logits.shape[:2], self.num_classes, dtype=torch.int64, device=obj_logits.device)
@@ -183,9 +183,9 @@ class SetCriterion(nn.Module):
         """ Compute the cardinality error, ie the absolute error in the number of predicted non-empty boxes
         This is not really a loss, it is intended for logging purposes only. It doesn't propagate gradients
         """
-        pred_logits = outputs['rel_logits']
+        pred_logits = outputs['pred_logits']
         device = pred_logits.device
-        tgt_lengths = torch.as_tensor([len(v["rel_annotations"]) for v in targets], device=device)
+        tgt_lengths = torch.as_tensor([len(v["labels"]) for v in targets], device=device)
         # Count the number of predictions that are NOT "no-object" (which is the last class)
         card_pred = (pred_logits.argmax(-1) != pred_logits.shape[-1] - 1).sum(1)
         card_err = F.l1_loss(card_pred.float(), tgt_lengths.float())
@@ -203,8 +203,8 @@ class SetCriterion(nn.Module):
         target_entry_boxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(targets, indices[0])], dim=0)
 
         rel_idx = self._get_src_permutation_idx(indices[1])
-        target_rels_boxes = torch.cat([t['boxes'][t["rel_annotations"][i, 0]] for t, (_, i) in zip(targets, indices[1])], dim=0)
-        target_relo_boxes = torch.cat([t['boxes'][t["rel_annotations"][i, 1]] for t, (_, i) in zip(targets, indices[1])], dim=0)
+        target_rels_boxes = torch.cat([t['boxes'][i][:len(t['boxes'][i]) // 2] for t, (_, i) in zip(targets, indices[1])], dim=0)
+        target_relo_boxes = torch.cat([t['boxes'][i][len(t['boxes'][i]) // 2:] for t, (_, i) in zip(targets, indices[1])], dim=0)
         rels_boxes = outputs['sub_boxes'][rel_idx]
         relo_boxes = outputs['obj_boxes'][rel_idx]
 
@@ -256,7 +256,7 @@ class SetCriterion(nn.Module):
         self.indices = indices
 
         # Compute the average number of target boxes accross all nodes, for normalization purposes
-        num_boxes = sum(len(t["labels"])+len(t["rel_annotations"]) for t in targets)
+        num_boxes = sum(len(t["labels"]) for t in targets)
         num_boxes = torch.as_tensor([num_boxes], dtype=torch.float, device=next(iter(outputs.values())).device)
         if is_dist_avail_and_initialized():
             torch.distributed.all_reduce(num_boxes)

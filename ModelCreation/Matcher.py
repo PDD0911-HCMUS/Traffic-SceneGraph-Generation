@@ -33,7 +33,7 @@ class HungarianMatcher(nn.Module):
     def forward(self, outputs, targets):
 
         bs, num_queries = outputs["pred_logits"].shape[:2]
-        num_queries_rel = outputs["rel_logits"].shape[1]
+        #num_queries_rel = outputs["rel_logits"].shape[1]
         alpha = 0.25
         gamma = 2.0
 
@@ -88,28 +88,28 @@ class HungarianMatcher(nn.Module):
         cost_obj_bbox = torch.cdist(obj_bbox, obj_tgt_bbox, p=1)
         cost_obj_giou = -generalized_box_iou(box_cxcywh_to_xyxy(obj_bbox), box_cxcywh_to_xyxy(obj_tgt_bbox))
 
-        # Final triplet cost matrix
+        # Final couple cost matrix
         C_rel = self.cost_bbox * cost_sub_bbox + self.cost_bbox * cost_obj_bbox  + \
                 self.cost_class * cost_sub_class + self.cost_class * cost_obj_class + \
                 self.cost_giou * cost_sub_giou + self.cost_giou * cost_obj_giou
-        C_rel = C_rel.view(bs, num_queries_rel, -1).cpu()
+        C_rel = C_rel.view(bs, num_queries, -1).cpu()
 
-        # sizes1 = [len(v["rel_annotations"]) for v in targets]
-        # indices1 = [linear_sum_assignment(c[i]) for i, c in enumerate(C_rel.split(sizes1, -1))]
+        sizes1 = [int(len(v["boxes"])) for v in targets]
+        indices1 = [linear_sum_assignment(c[i]) for i, c in enumerate(C_rel.split(sizes1, -1))]
 
         # assignment strategy to avoid assigning <background-no_relationship-background > to some good predictions
-        sub_weight = torch.ones((bs, num_queries_rel)).to(out_prob.device)
+        sub_weight = torch.ones((bs, num_queries)).to(out_prob.device)
         good_sub_detection = torch.logical_and((outputs["sub_logits"].flatten(0, 1)[:, :-1].argmax(-1)[:, None] == tgt_ids),
                                                (box_iou(box_cxcywh_to_xyxy(sub_bbox), box_cxcywh_to_xyxy(tgt_bbox))[0] >= self.iou_threshold))
         for i, c in enumerate(good_sub_detection.split(sizes, -1)):
-            sub_weight[i, c.sum(-1)[i*num_queries_rel:(i+1)*num_queries_rel].to(torch.bool)] = 0
+            sub_weight[i, c.sum(-1)[i*num_queries:(i+1)*num_queries].to(torch.bool)] = 0
             sub_weight[i, indices[i][0]] = 1
 
-        obj_weight = torch.ones((bs, num_queries_rel)).to(out_prob.device)
+        obj_weight = torch.ones((bs, num_queries)).to(out_prob.device)
         good_obj_detection = torch.logical_and((outputs["obj_logits"].flatten(0, 1)[:, :-1].argmax(-1)[:, None] == tgt_ids),
                                                (box_iou(box_cxcywh_to_xyxy(obj_bbox), box_cxcywh_to_xyxy(tgt_bbox))[0] >= self.iou_threshold))
         for i, c in enumerate(good_obj_detection.split(sizes, -1)):
-            obj_weight[i, c.sum(-1)[i*num_queries_rel:(i+1)*num_queries_rel].to(torch.bool)] = 0
+            obj_weight[i, c.sum(-1)[i*num_queries:(i+1)*num_queries].to(torch.bool)] = 0
             obj_weight[i, indices[i][0]] = 1
 
         return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices],\
