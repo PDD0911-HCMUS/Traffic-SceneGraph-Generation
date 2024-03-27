@@ -17,7 +17,7 @@ import torch.utils.data
 import torchvision
 from pycocotools import mask as coco_mask
 
-import TransformUtils as T
+import Datasets.TransformUtils as T
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -93,14 +93,10 @@ class ConvertCocoPolysToMask(object):
             if num_keypoints:
                 keypoints = keypoints.view(num_keypoints, -1, 3)
 
-        keep = (boxes[:, 3] > boxes[:, 1]) & (boxes[:, 2] > boxes[:, 0])
-        boxes = boxes[keep]
-        classes = classes[keep]
-        if self.return_masks:
-            masks = masks[keep]
-        if keypoints is not None:
-            keypoints = keypoints[keep]
-
+        # keep = (boxes[:, 3] > boxes[:, 1]) & (boxes[:, 2] > boxes[:, 0])
+        # boxes = boxes[keep]
+        # classes = classes[keep]
+                
         target = {}
         target["boxes"] = boxes
         target["labels"] = classes
@@ -111,10 +107,10 @@ class ConvertCocoPolysToMask(object):
             target["keypoints"] = keypoints
 
         # for conversion to coco api
-        #area = torch.tensor([obj["area"] for obj in anno])
+        area = torch.tensor([obj["area"] for obj in anno])
         iscrowd = torch.tensor([obj["iscrowd"] if "iscrowd" in obj else 0 for obj in anno])
-        #target["area"] = area[keep]
-        target["iscrowd"] = iscrowd[keep]
+        target["area"] = area
+        target["iscrowd"] = iscrowd
 
         target["orig_size"] = torch.as_tensor([int(h), int(w)])
         target["size"] = torch.as_tensor([int(h), int(w)])
@@ -153,15 +149,17 @@ def make_coco_transforms(image_set):
     raise ValueError(f'unknown {image_set}')
 
 
-def build(image_set, ann_path, img_folder):
+def build_data(image_set, ann_path, img_folder):
 
     # ann_path = args.ann_path
     # img_folder = args.img_folder
 
     if image_set == 'train':
-        ann_file = ann_path + 'train.json'
+        #ann_file = ann_path + 'train.json'
+        ann_file = ann_path + 'train_small.json'
     elif image_set == 'val':
-        ann_file = ann_path + 'val.json'
+        #ann_file = ann_path + 'val.json'
+        ann_file = ann_path + 'val_small.json'
 
     dataset = CocoDetection(img_folder, ann_file, transforms=make_coco_transforms(image_set), return_masks=False)
     return dataset

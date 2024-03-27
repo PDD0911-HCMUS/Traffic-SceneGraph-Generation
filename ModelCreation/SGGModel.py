@@ -153,29 +153,31 @@ class SetCriterion(nn.Module):
         sub_logits = outputs['sub_logits']
         obj_logits = outputs['obj_logits']
 
-        rel_idx = self._get_src_permutation_idx(indices[1])
-        target_rels_classes_o = torch.cat([t["labels"][J][:len(t['labels'][J]) // 2] for t, (_, J) in zip(targets, indices[1])])
-        target_relo_classes_o = torch.cat([t["labels"][J][len(t['labels'][J]) // 2:] for t, (_, J) in zip(targets, indices[1])])
+        rel_idx_s = self._get_src_permutation_idx(indices[2])
+        rel_idx_o = self._get_src_permutation_idx(indices[3])
+
+        target_rels_classes_o = torch.cat([t["labels"][J] for t, (_, J) in zip(targets, indices[2])])
+        target_relo_classes_o = torch.cat([t["labels"][J] for t, (_, J) in zip(targets, indices[3])])
 
         target_sub_classes = torch.full(sub_logits.shape[:2], self.num_classes, dtype=torch.int64, device=sub_logits.device)
         target_obj_classes = torch.full(obj_logits.shape[:2], self.num_classes, dtype=torch.int64, device=obj_logits.device)
 
-        target_sub_classes[rel_idx] = target_rels_classes_o
-        target_obj_classes[rel_idx] = target_relo_classes_o
+        target_sub_classes[rel_idx_s] = target_rels_classes_o
+        target_obj_classes[rel_idx_o] = target_relo_classes_o
 
         target_classes = torch.cat((target_classes, target_sub_classes, target_obj_classes), dim=1)
         src_logits = torch.cat((pred_logits, sub_logits, obj_logits), dim=1)
 
         loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight, reduction='none')
 
-        loss_weight = torch.cat((torch.ones(pred_logits.shape[:2]).to(pred_logits.device), indices[2]*0.5, indices[3]*0.5), dim=-1)
+        loss_weight = torch.cat((torch.ones(pred_logits.shape[:2]).to(pred_logits.device), indices[4]*0.5, indices[5]*0.5), dim=-1)
         losses = {'loss_ce': (loss_ce * loss_weight).sum()/self.empty_weight[target_classes].sum()}
 
         if log:
             # TODO this should probably be a separate loss, not hacked in this one here
             losses['class_error'] = 100 - accuracy(pred_logits[idx], target_classes_o)[0]
-            losses['sub_error'] = 100 - accuracy(sub_logits[rel_idx], target_rels_classes_o)[0]
-            losses['obj_error'] = 100 - accuracy(obj_logits[rel_idx], target_relo_classes_o)[0]
+            losses['sub_error'] = 100 - accuracy(sub_logits[rel_idx_s], target_rels_classes_o)[0]
+            losses['obj_error'] = 100 - accuracy(obj_logits[rel_idx_o], target_relo_classes_o)[0]
         return losses
 
     @torch.no_grad()
@@ -202,11 +204,12 @@ class SetCriterion(nn.Module):
         pred_boxes = outputs['pred_boxes'][idx]
         target_entry_boxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(targets, indices[0])], dim=0)
 
-        rel_idx = self._get_src_permutation_idx(indices[1])
-        target_rels_boxes = torch.cat([t['boxes'][i][:len(t['boxes'][i]) // 2] for t, (_, i) in zip(targets, indices[1])], dim=0)
-        target_relo_boxes = torch.cat([t['boxes'][i][len(t['boxes'][i]) // 2:] for t, (_, i) in zip(targets, indices[1])], dim=0)
-        rels_boxes = outputs['sub_boxes'][rel_idx]
-        relo_boxes = outputs['obj_boxes'][rel_idx]
+        rel_idx_s = self._get_src_permutation_idx(indices[2])
+        rel_idx_o = self._get_src_permutation_idx(indices[3])
+        target_rels_boxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(targets, indices[2])], dim=0)
+        target_relo_boxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(targets, indices[3])], dim=0)
+        rels_boxes = outputs['sub_boxes'][rel_idx_s]
+        relo_boxes = outputs['obj_boxes'][rel_idx_o]
 
         src_boxes = torch.cat((pred_boxes, rels_boxes, relo_boxes), dim=0)
         target_boxes = torch.cat((target_entry_boxes, target_rels_boxes, target_relo_boxes), dim=0)
@@ -273,7 +276,7 @@ class SetCriterion(nn.Module):
                 indices = self.matcher(aux_outputs, targets)
                 for loss in self.losses:
                     kwargs = {}
-                    if loss == 'labels' or loss == 'relations':
+                    if loss == 'labels':
                         # Logging is enabled only for the last layer
                         kwargs = {'log': False}
                     l_dict = self.get_loss(loss, aux_outputs, targets, indices, num_boxes, **kwargs)
@@ -337,9 +340,9 @@ def build():
     device = torch.device(args.device)
 
     backbone = build_backbone()
-
     transformer = build_transformer()
     matcher = build_matcher()
+
     model = SGGnLLM(
         backbone,
         transformer,
@@ -363,7 +366,7 @@ def build():
 
     criterion = SetCriterion(num_classes , matcher=matcher, weight_dict=weight_dict,
                              eos_coef=args.eos_coef, losses=losses)
-    criterion.to(device)
+    #criterion.to(device)
     postprocessors = {'bbox': PostProcess()}
 
     return model, criterion, postprocessors

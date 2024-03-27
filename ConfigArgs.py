@@ -12,15 +12,20 @@ vgAnnoVal = 'Val/anno'
 resize = (224,224)
 mean = (0.485, 0.456, 0.406)
 std = (0.229, 0.224, 0.225)
-batch = 2
+batch_size = 2
 
 num_entities = 100
 num_triplets = 100
+
+ann_path = 'Datasets/VisualGenome/Annotation/'
+img_folder = 'Datasets/VisualGenome/VG_100K/'
 
 '''Loss coefficients'''
 bbox_loss_coef = 5
 giou_loss_coef = 2
 aux_loss = False
+
+out_dir = 'CheckPoint'
 
 
 '''Args Model'''

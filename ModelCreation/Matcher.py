@@ -37,6 +37,8 @@ class HungarianMatcher(nn.Module):
         alpha = 0.25
         gamma = 2.0
 
+        # print(targets)
+
         # We flatten to compute the cost matrices in a batch
         out_prob = outputs["pred_logits"].flatten(0, 1).sigmoid()
         out_bbox = outputs["pred_boxes"].flatten(0, 1)
@@ -64,13 +66,16 @@ class HungarianMatcher(nn.Module):
         indices = [linear_sum_assignment(c[i]) for i, c in enumerate(C.split(sizes, -1))]
 
         # Concat the subject/object/predicate labels and subject/object boxes
+
         sub_tgt_bbox = torch.cat([v['boxes'][: int(len(v['boxes']) / 2)] for v in targets])
         sub_tgt_ids = torch.cat([v['labels'][: int(len(v['boxes']) / 2)] for v in targets])
+
         obj_tgt_bbox = torch.cat([v['boxes'][int(len(v['boxes']) / 2) : ] for v in targets])
         obj_tgt_ids = torch.cat([v['labels'][int(len(v['boxes']) / 2) : ] for v in targets])
 
         sub_prob = outputs["sub_logits"].flatten(0, 1).sigmoid()
         sub_bbox = outputs["sub_boxes"].flatten(0, 1)
+
         obj_prob = outputs["obj_logits"].flatten(0, 1).sigmoid()
         obj_bbox = outputs["obj_boxes"].flatten(0, 1)
 
@@ -89,13 +94,27 @@ class HungarianMatcher(nn.Module):
         cost_obj_giou = -generalized_box_iou(box_cxcywh_to_xyxy(obj_bbox), box_cxcywh_to_xyxy(obj_tgt_bbox))
 
         # Final couple cost matrix
-        C_rel = self.cost_bbox * cost_sub_bbox + self.cost_bbox * cost_obj_bbox  + \
-                self.cost_class * cost_sub_class + self.cost_class * cost_obj_class + \
-                self.cost_giou * cost_sub_giou + self.cost_giou * cost_obj_giou
-        C_rel = C_rel.view(bs, num_queries, -1).cpu()
+        C_s = self.cost_bbox * cost_sub_bbox + \
+                self.cost_class * cost_sub_class + \
+                self.cost_giou * cost_sub_giou
+        
+        C_o = self.cost_bbox * cost_obj_bbox  + \
+                self.cost_class * cost_obj_class + \
+                self.cost_giou * cost_obj_giou
+        C_s = C_s.view(bs, num_queries, -1).cpu()
+        C_o = C_o.view(bs, num_queries, -1).cpu()
 
-        sizes1 = [int(len(v["boxes"])) for v in targets]
+        C_rel = torch.cat((C_s, C_o), dim=2)
+
+        sizes1 = [len(v["boxes"]) for v in targets]
         indices1 = [linear_sum_assignment(c[i]) for i, c in enumerate(C_rel.split(sizes1, -1))]
+        
+        # tmp = [len(v["boxes"]) for v in targets]
+        # print(tmp)
+
+        sizes_so = [int(len(v["boxes"]) / 2) for v in targets]
+        indices_sub = [linear_sum_assignment(c[i]) for i, c in enumerate(C_s.split(sizes_so, -1))]
+        indices_obj = [linear_sum_assignment(c[i]) for i, c in enumerate(C_o.split(sizes_so, -1))]
 
         # assignment strategy to avoid assigning <background-no_relationship-background > to some good predictions
         sub_weight = torch.ones((bs, num_queries)).to(out_prob.device)
@@ -114,6 +133,8 @@ class HungarianMatcher(nn.Module):
 
         return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices],\
                [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices1],\
+               [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices_sub],\
+               [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices_obj],\
                sub_weight, obj_weight
 
 

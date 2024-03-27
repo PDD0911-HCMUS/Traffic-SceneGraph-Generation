@@ -467,6 +467,15 @@ def all_gather(data):
 
     return data_list
 
+def get_coco_api_from_dataset(dataset):
+    for _ in range(10):
+        # if isinstance(dataset, torchvision.datasets.CocoDetection):
+        #     break
+        if isinstance(dataset, torch.utils.data.Subset):
+            dataset = dataset.dataset
+    if isinstance(dataset, torchvision.datasets.CocoDetection):
+        return dataset.coco
+
         
 def save_on_master(*args, **kwargs):
     if is_main_process():

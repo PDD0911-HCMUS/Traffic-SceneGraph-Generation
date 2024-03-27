@@ -1,5 +1,6 @@
-from Datasets.DatasetLoader_3 import BuildDataset, imshow
-from Datasets.Util import nested_tensor_from_tensor_list, get_rank, is_main_process, save_on_master
+import ConfigArgs as args
+from Datasets.DatasetLoader_3 import build_data, imshow
+from Datasets.Util import nested_tensor_from_tensor_list, get_rank, is_main_process, save_on_master, get_coco_api_from_dataset, collate_fn
 import matplotlib.pyplot as plt
 from ModelCreation.SGGModel import build
 import torch
@@ -10,7 +11,8 @@ from TrainEngine import train_one_epoch, evaluate
 import numpy as np
 import random
 import json
-from ModelCreation.MatcherSub import build_matcher_sub
+from torch.utils.data import DataLoader
+
 
 #from torch.utils.tensorboard import SummaryWriter
 
@@ -19,15 +21,15 @@ if __name__ == '__main__':
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
-    device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
+    device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
     #device = torch.device('cuda:2')
     aux_loss = False
     dec_layers = 6
     lr_drop = 3
-    ouputDir = Path('CheckPoint')
+    ouputDir = Path(args.out_dir)
     
     print('Device is being used: ', device)
-    model, criterion, postprocessors_sub, postprocessors_obj = build(device = device, aux_loss=aux_loss, dec_layers=dec_layers)
+    model, criterion, postprocessors = build()
     model.to(device)
     criterion.to(device)
     model_without_ddp = model
@@ -44,17 +46,26 @@ if __name__ == '__main__':
                                   weight_decay=1e-4)
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, lr_drop)
 
-    trainDataLoader = BuildDataset(mode='train')
-    validDataLoader = BuildDataset(mode='val')
+    trainData = build_data('train', args.ann_path, args.img_folder)
+    validData = build_data('val', args.ann_path, args.img_folder)
+
+    sampler_train = torch.utils.data.RandomSampler(trainData)
+    sampler_val = torch.utils.data.SequentialSampler(validData)
+
+    batch_sampler_train = torch.utils.data.BatchSampler(
+        sampler_train, args.batch_size, drop_last=True)
+
+    base_ds = get_coco_api_from_dataset(validData)
+
+    trainDataLoader = DataLoader(trainData, batch_sampler=batch_sampler_train, collate_fn=collate_fn)
+    validDataLoader = DataLoader(validData, args.batch_size, sampler=sampler_val,drop_last=False, collate_fn=collate_fn)
 
     print("Start training")
-    for epoch in range(0,50):
-        train_stats = train_one_epoch(
-            model, criterion, trainDataLoader, optimizer, device, epoch,
-            0.1)
+    for epoch in range(0,100):
+        train_stats = train_one_epoch(model, criterion, trainDataLoader, optimizer, device, epoch,0.1)
         lr_scheduler.step()
         checkpoint_paths = [ouputDir / 'checkpoint.pth']
-        if (epoch + 1) % lr_drop == 0 or (epoch + 1) % 100 == 0:
+        if (epoch + 1) % lr_drop == 0 or (epoch + 1) % 2 == 0:
             checkpoint_paths.append(ouputDir / f'checkpoint{epoch:04}.pth')
 
             for checkpoint_path in checkpoint_paths:
@@ -67,7 +78,7 @@ if __name__ == '__main__':
 
         ###
         # TODO: make evaluation in here
-        test_stats = evaluate(model, criterion, validDataLoader, device)
+        test_stats, coco_evaluator = evaluate(model, criterion, postprocessors, validDataLoader, base_ds, device)
         ###
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                      **{f'test_{k}': v for k, v in test_stats.items()},
@@ -82,16 +93,16 @@ if __name__ == '__main__':
 
     torch.save(model.state_dict(), ouputDir / f'eval/{epoch:03}.pth')
 
-    # dataloaderDict = {
-    #     "train": trainDataLoader,
-    #     "val": validDataLoader
-    # }
-    # batchIter = iter(dataloaderDict['train'])
-    # inputs, target = next(batchIter)
-    # print(len(target))
-    # print(target[0])
-    # imshow(inputs.tensors[0])
-    # plt.show()
+    dataloaderDict = {
+        "train": trainDataLoader,
+        "val": validDataLoader
+    }
+    batchIter = iter(dataloaderDict['train'])
+    inputs, target = next(batchIter)
+    print(len(target))
+    print(target[0])
+    imshow(inputs.tensors[0])
+    plt.show()
 
 
     # matcher_sub = build_matcher_sub()
@@ -105,11 +116,12 @@ if __name__ == '__main__':
     #     # indices_sub = matcher_sub(outputs_without_aux, targets)
     #     loss_dict = criterion(outputs, targets)
     #     # print(indices_sub[0])
-    #     # print('pred_sub_logits: ', outputs['pred_sub_logits'].size())
-    #     # print('pred_obj_logits: ', outputs['pred_obj_logits'].size())
-    #     # print('pred_boxes_sub: ', outputs['pred_boxes_sub'].size())
-    #     # print('pred_boxes_obj: ', outputs['pred_boxes_obj'].size())
+    #     print('pred_logits: ', outputs['pred_logits'].size())
+    #     print('sub_logits: ', outputs['sub_logits'].size())
+    #     print('obj_logits: ', outputs['obj_logits'].size())
+
+    #     print('pred_boxes: ', outputs['pred_boxes'].size())
+    #     print('sub_boxes: ', outputs['sub_boxes'].size())
+    #     print('obj_boxes: ', outputs['obj_boxes'].size())
     #     # print('pred_rel: ', out['pred_rel'].size())
-    #     # sizes = [len(v["subBbox"]) for v in targets]
-    #     # print(sizes)
     #     break
