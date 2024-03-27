@@ -14,7 +14,7 @@ import random
 import json
 import torchvision.transforms as T
 from PIL import Image, ImageDraw
-#from torch.utils.tensorboard import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 # standard PyTorch mean-std input image normalization
 transform = T.Compose([
     T.Resize(512),
@@ -23,7 +23,7 @@ transform = T.Compose([
 ])
 
 ouputDir = 'Checkpoint/'
-cpkt = '001.pth'
+cpkt = '049.pth'
 #cpkt = 'checkpoint0032.pth'
 
 image_test_dir = 'Datasets/VisualGenome/Train/image/'
@@ -61,6 +61,18 @@ def detect(im, model, transform):
     # convert boxes from [0; 1] to image scales
     bboxes_scaled = rescale_bboxes(outputs['pred_boxes'][0, keep], im.size)
     return probas[keep], bboxes_scaled
+
+class ModelWrapper(torch.nn.Module):
+    def __init__(self, model):
+        super(ModelWrapper, self).__init__()
+        self.model = model
+
+    def forward(self, x):
+        # Gọi mô hình gốc và lấy đầu ra
+        output = self.model(x)
+        # Trả về một hoặc nhiều thành phần cụ thể từ dictionary hoặc chuyển đổi nó thành tuple hoặc NamedTuple
+        return output['pred_sub_logits'] 
+    
 if __name__ == '__main__':
     
     seed = 42 + get_rank()
@@ -91,11 +103,9 @@ if __name__ == '__main__':
     # plt.show()
 
     print("Start Evaluation")
-
+    image = Image.open(image_test_dir + image_test_name)
+    img = transform(image).unsqueeze(0)
     with torch.no_grad():
-
-        image = Image.open(image_test_dir + image_test_name)
-        img = transform(image).unsqueeze(0)
         outputs = model(img)
         probas_sub = outputs['pred_sub_logits'].softmax(-1)[0, :, :-1]
         probas_obj = outputs['pred_obj_logits'].softmax(-1)[0, :, :-1]

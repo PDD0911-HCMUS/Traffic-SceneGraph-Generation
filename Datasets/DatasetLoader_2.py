@@ -204,7 +204,7 @@ if __name__ == '__main__':
     img_folder = 'Datasets/VisualGenome/VG_100K/'
     trainDataset = build('val', ann_path, img_folder)
     print(len(trainDataset))
-    index = 1000
+    index = 10
     imageTransform, target = trainDataset.__getitem__(index)
     print(imageTransform.shape)
 

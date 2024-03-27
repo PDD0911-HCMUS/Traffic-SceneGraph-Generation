@@ -17,15 +17,16 @@ import Datasets.Util as utils
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
                     device: torch.device, epoch: int, max_norm: float = 0):
+    print(device)
     model.train()
     criterion.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
-    metric_logger.add_meter('class_error_sub', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
-    metric_logger.add_meter('class_error_obj', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
-    metric_logger.add_meter('rel_error', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
-    metric_logger.add_meter('loss_bbox_sub', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
-    metric_logger.add_meter('loss_bbox_obj', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
+    metric_logger.add_meter('sub_error', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
+    metric_logger.add_meter('obj_error', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
+    # metric_logger.add_meter('rel_error', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
+    # metric_logger.add_meter('loss_bbox_sub', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
+    # metric_logger.add_meter('loss_bbox_obj', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
     header = 'Epoch: [{}]'.format(epoch)
     print_freq = 500
 
@@ -60,9 +61,9 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         optimizer.step()
 
         metric_logger.update(loss=loss_value, **loss_dict_reduced_scaled, **loss_dict_reduced_unscaled)
-        metric_logger.update(class_error_sub=loss_dict_reduced['class_error_sub'])
-        metric_logger.update(class_error_obj=loss_dict_reduced['class_error_obj'])
-        metric_logger.update(rel_error=loss_dict_reduced['rel_error'])
+        metric_logger.update(sub_error=loss_dict_reduced['sub_error'])
+        metric_logger.update(obj_error=loss_dict_reduced['obj_error'])
+        # metric_logger.update(rel_error=loss_dict_reduced['rel_error'])
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
@@ -76,11 +77,11 @@ def evaluate(model, criterion, data_loader, device):
     criterion.eval()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
-    metric_logger.add_meter('class_error_sub', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
-    metric_logger.add_meter('class_error_obj', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
-    metric_logger.add_meter('rel_error', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
-    metric_logger.add_meter('loss_bbox_sub', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
-    metric_logger.add_meter('loss_bbox_obj', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
+    metric_logger.add_meter('sub_error', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
+    metric_logger.add_meter('obj_error', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
+    # metric_logger.add_meter('rel_error', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
+    # metric_logger.add_meter('loss_bbox_sub', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
+    # metric_logger.add_meter('loss_bbox_obj', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
     header = 'Test:'
     # coco_evaluator.coco_eval[iou_types[0]].params.iouThrs = [0, 0.1, 0.5, 0.75]
 
@@ -102,9 +103,9 @@ def evaluate(model, criterion, data_loader, device):
                              **loss_dict_reduced_scaled,
                              **loss_dict_reduced_unscaled)
         
-        metric_logger.update(class_error_sub=loss_dict_reduced['class_error_sub'])
-        metric_logger.update(class_error_obj=loss_dict_reduced['class_error_obj'])
-        metric_logger.update(rel_error=loss_dict_reduced['rel_error'])
+        metric_logger.update(sub_error=loss_dict_reduced['sub_error'])
+        metric_logger.update(obj_error=loss_dict_reduced['obj_error'])
+        # metric_logger.update(rel_error=loss_dict_reduced['rel_error'])
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()

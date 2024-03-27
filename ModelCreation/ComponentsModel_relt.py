@@ -28,7 +28,7 @@ class MLP(nn.Module):
 class SGG(nn.Module):
     """ RelTR: Relation Transformer for Scene Graph Generation """
     def __init__(self, backbone, 
-                 num_sub, num_obj, 
+                 num_queries, 
                  num_classes, transformer, 
                  num_rel_classes, aux_loss=False
                 # transformer , num_classes, num_rel_classes, num_entities, num_triplets, aux_loss=False, matcher=None
@@ -44,11 +44,11 @@ class SGG(nn.Module):
         """
         super().__init__()
 
-        self.num_sub = num_sub
-        self.num_obj = num_obj
-
+        self.num_queries = num_queries
+        self.transformer = transformer
         hidden_dim = transformer.d_model
-        self.aux_loss = aux_loss
+        self.hidden_dim = hidden_dim
+        
         
         ''' FFN for sub-obj detection'''
         self.class_sub_embed = nn.Linear(hidden_dim, num_classes + 1)
@@ -61,14 +61,17 @@ class SGG(nn.Module):
         #self.rel_class_embed = MLP(hidden_dim, hidden_dim, num_rel_classes + 1, 2)
 
         '''sub queries and obj queries'''
-        self.sub_embed = nn.Embedding(num_sub, hidden_dim)
-        self.obj_embed = nn.Embedding(num_obj, hidden_dim)
-
-        '''Backbone and Transformer'''
-        self.backbone = backbone
-        self.transformer = transformer
+        self.query_embed = nn.Embedding(num_queries, hidden_dim)
 
         self.input_proj = nn.Conv2d(backbone.num_channels, hidden_dim, kernel_size=1)
+
+        '''Backbone'''
+        self.backbone = backbone
+
+        self.aux_loss = aux_loss
+        
+
+        
 
     def forward(self, samples: NestedTensor):
 
@@ -79,8 +82,9 @@ class SGG(nn.Module):
 
         assert mask is not None
 
-        hs_sub, hs_obj = self.transformer(self.input_proj(src), mask, self.sub_embed.weight, self.obj_embed.weight, pos[-1])
-
+        hs,_ = self.transformer(self.input_proj(src), mask, self.query_embed.weight, pos[-1])
+        print('hs.size(): ', hs.size())
+        hs_sub, hs_obj = torch.split(hs, self.hidden_dim, dim=-1)
         outputs_sub_class = self.class_sub_embed(hs_sub)
         outputs_obj_class = self.class_obj_embed(hs_obj)
         outputs_coord_sub = self.bbox_sub_embed(hs_sub).sigmoid()
@@ -394,6 +398,7 @@ def build(device, aux_loss, dec_layers):
     hidden_dim = 256
     num_sub = 100
     num_obj=100
+    num_queries = 100
     num_classes=181
     num_rel = 51
 
@@ -402,8 +407,7 @@ def build(device, aux_loss, dec_layers):
 
     model = SGG(backbone, 
                 transformer=transformer,
-                num_sub = num_sub,
-                num_obj = num_obj,
+                num_queries=num_queries,
                 num_classes=num_classes,
                 num_rel_classes = num_rel,
                 aux_loss=aux_loss

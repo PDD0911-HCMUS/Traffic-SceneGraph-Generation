@@ -49,26 +49,28 @@ class Transformer(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def forward(self, src, mask, sub_embed, obj_embed, pos_embed):
+    def forward(self, src, mask, query_embed, pos_embed):
         # flatten NxCxHxW to HWxNxC
         bs, c, h, w = src.shape
         src = src.flatten(2).permute(2, 0, 1)
         pos_embed = pos_embed.flatten(2).permute(2, 0, 1)
 
-        sub_embed = sub_embed.unsqueeze(1).repeat(1, bs, 1)
-        obj_embed = obj_embed.unsqueeze(1).repeat(1, bs, 1)
+        query_embed = query_embed.unsqueeze(1).repeat(1, bs, 1)
         mask = mask.flatten(1)
-
-        sub_entity = torch.zeros_like(sub_embed)
-        obj_entity = torch.zeros_like(obj_embed)
+        #print('query_embed: ', query_embed.size())
+        # cp_tgt = torch.zeros_like(query_embed)
+        cp_tgt = torch.zeros(query_embed.size(0), query_embed.size(1), query_embed.size(2)*2)
 
         memory = self.encoder(src, src_key_padding_mask=mask, pos=pos_embed)
 
         # hs_rel, hs_sub, hs_obj = self.decoder(sub_entity, obj_entity, memory, memory_key_padding_mask=mask,
         #                   pos=pos_embed, sub_pos=sub_embed, obj_pos = obj_embed)
-        hs_sub, hs_obj = self.decoder(sub_entity, obj_entity, memory, memory_key_padding_mask=mask,
-                          pos=pos_embed, sub_pos=sub_embed, obj_pos = obj_embed)
-        return  hs_sub.transpose(1, 2),hs_obj.transpose(1, 2)
+        hs= self.decoder(cp_tgt, memory, memory_key_padding_mask=mask,
+                          pos=pos_embed, query_pos=query_embed)
+        # t = hs.transpose(1, 2)
+        # print('type output: ', type(t))
+        # print('size oupt transformer: ', t.size())
+        return  hs.transpose(1, 2), memory.permute(1, 2, 0).view(bs, c, h, w)
 
 
 class TransformerEncoder(nn.Module):
@@ -104,34 +106,29 @@ class TransformerDecoder(nn.Module):
         self.norm = norm
         self.return_intermediate = return_intermediate
 
-    def forward(self, sub_entity, obj_entity, memory,
+    def forward(self, cp_tgt, memory,
                 tgt_mask: Optional[Tensor] = None,
                 memory_mask: Optional[Tensor] = None,
                 tgt_key_padding_mask: Optional[Tensor] = None,
                 memory_key_padding_mask: Optional[Tensor] = None,
                 pos: Optional[Tensor] = None,
-                sub_pos: Optional[Tensor] = None,
-                obj_pos: Optional[Tensor] = None):
+                query_pos: Optional[Tensor] = None):
         
-        output_sub = sub_entity
-        output_obj = obj_entity
+        output = cp_tgt
 
-        intermediate_sub = []
-        intermediate_obj = []
+        intermediate = []
 
 
         for layer in self.layers:
-            output_sub, outbput_obj = layer(output_sub, output_obj, sub_pos, obj_pos, 
-                                                  memory, tgt_mask=tgt_mask, memory_mask=memory_mask,
-                                                  tgt_key_padding_mask=tgt_key_padding_mask,
-                                                  memory_key_padding_mask=memory_key_padding_mask, pos=pos)
+            output = layer(output, memory, tgt_mask=tgt_mask, memory_mask=memory_mask,
+                            tgt_key_padding_mask=tgt_key_padding_mask,
+                            memory_key_padding_mask=memory_key_padding_mask, pos=pos, query_pos=query_pos)
             if self.return_intermediate:
-                intermediate_sub.append(output_sub)
-                intermediate_obj.append(outbput_obj)
+                intermediate.append(output)
 
 
         if self.return_intermediate:
-            return torch.stack(intermediate_sub), torch.stack(intermediate_obj)
+            return torch.stack(intermediate)
 class TransformerEncoderLayer(nn.Module):
 
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1,
@@ -210,21 +207,24 @@ class TransformerDecoderLayer(nn.Module):
     def with_pos_embed(self, tensor, pos: Optional[Tensor]):
         return tensor if pos is None else tensor + pos
 
-    def forward(self, tgt_sub, tgt_obj, query_pos_sub, query_pos_obj,
+    def forward(self, tgt_cp,
                 memory, tgt_mask: Optional[Tensor] = None, 
                 memory_mask: Optional[Tensor] = None,
                 tgt_key_padding_mask: Optional[Tensor] = None,
                 memory_key_padding_mask: Optional[Tensor] = None, 
-                pos: Optional[Tensor] = None):
+                pos: Optional[Tensor] = None,
+                query_pos: Optional[Tensor] = None):
         
+        h_dim = query_pos.shape[2]
+        tgt_sub, tgt_obj = torch.split(tgt_cp, h_dim, dim=-1)
         '''Couple Entities Detection'''
-        q_sub = k_sub = self.with_pos_embed(tgt_sub, query_pos_sub)
+        q_sub = k_sub = self.with_pos_embed(tgt_sub, query_pos)
         tgt2_sub = self.self_attn_sub(q_sub, k_sub, value=tgt_sub, attn_mask=tgt_mask,
                               key_padding_mask=tgt_key_padding_mask)[0]
         tgt_sub = tgt_sub + self.dropout1_sub(tgt2_sub)
         tgt_sub = self.norm1_sub(tgt_sub)
         
-        tgt2_sub = self.multihead_attn_sub(query=self.with_pos_embed(tgt_sub, query_pos_sub),
+        tgt2_sub = self.multihead_attn_sub(query=self.with_pos_embed(tgt_sub, query_pos),
                                    key=self.with_pos_embed(memory, pos),
                                    value=memory, attn_mask=memory_mask,
                                    key_padding_mask=memory_key_padding_mask)[0]
@@ -235,12 +235,12 @@ class TransformerDecoderLayer(nn.Module):
         tgt_sub = self.norm3_sub(tgt_sub)
 
         
-        q_obj = k_obj = self.with_pos_embed(tgt_obj, query_pos_obj)
+        q_obj = k_obj = self.with_pos_embed(tgt_sub, query_pos)
         tgt2_obj = self.self_attn_obj(q_obj, k_obj, value=tgt_obj, attn_mask=tgt_mask,
                               key_padding_mask=tgt_key_padding_mask)[0]
         tgt_obj = tgt_obj + self.dropout1_obj(tgt2_obj)
         tgt_obj = self.norm1_obj(tgt_obj)
-        tgt2_obj = self.multihead_attn_obj(query=self.with_pos_embed(tgt_obj, query_pos_obj),
+        tgt2_obj = self.multihead_attn_obj(query=self.with_pos_embed(tgt_obj, query_pos),
                                    key=self.with_pos_embed(memory, pos),
                                    value=memory, attn_mask=memory_mask,
                                    key_padding_mask=memory_key_padding_mask)[0]
@@ -252,7 +252,9 @@ class TransformerDecoderLayer(nn.Module):
 
         # tgt_rel = tgt_sub + tgt_obj
         # return tgt, cp_maps
-        return tgt_sub, tgt_obj
+        tgt_cp = torch.cat((tgt_sub, tgt_obj), dim=-1)
+        return tgt_cp
+        #return tgt_sub, tgt_obj
         #return tgt_sub, tgt_att, cp_maps
 
 
